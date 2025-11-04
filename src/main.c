@@ -110,57 +110,71 @@ float findAxisTickSpacing(float size)
     return step;
 }
 
-void drawCartesianAxes()
+void drawCartesianPlaneAxes()
 {
+    // Config variables
     Color axisColor = DARKGRAY;
     Color axisNumberColor = axisColor;
-    char buffer[32];
     const float TICK_SIZE_FACTOR = 0.2f;
+    char buffer[32];
+
+    // Calculate tick spacing, size and text height
+    float spacingY, tickSizeY, spacingX, tickSizeX;
+    int textHeight = 0;
+    bool isXAxisVisible = viewState.viewPlaneRect.fr.y <= 0.0 && viewState.viewPlaneRect.to.y >= 0.0;
+    bool isYAxisVisible = viewState.viewPlaneRect.fr.x <= 0.0 && viewState.viewPlaneRect.to.x >= 0.0;
+    if (isXAxisVisible) {
+        spacingX = findAxisTickSpacing(viewState.viewPlaneRect.to.x - viewState.viewPlaneRect.fr.x);
+        tickSizeX = spacingX * xScreenToPlaneRatio() * TICK_SIZE_FACTOR;
+        textHeight = (int)tickSizeX * 2;
+    }
+    if (isYAxisVisible) {
+        spacingY = findAxisTickSpacing(viewState.viewPlaneRect.to.y - viewState.viewPlaneRect.fr.y);
+        tickSizeY = spacingY * yScreenToPlaneRatio() * TICK_SIZE_FACTOR;
+        if (textHeight == 0 || textHeight > (int)tickSizeY * 2)
+            textHeight = (int)tickSizeY * 2;
+    }
 
     // Draw X axis
-    if (viewState.viewPlaneRect.fr.y <= 0.0 && viewState.viewPlaneRect.to.y >= 0.0)
+    if (isXAxisVisible)
     {
         Vector2 a = getScreenPosition((Vector2){viewState.viewPlaneRect.fr.x, 0.0});
         Vector2 b = getScreenPosition((Vector2){viewState.viewPlaneRect.to.x, 0.0});
         DrawLineV(a, b, axisColor);
-
-        float spacing = findAxisTickSpacing(viewState.viewPlaneRect.to.x - viewState.viewPlaneRect.fr.x);
-        float firstTick = ceilf(viewState.viewPlaneRect.fr.x / spacing) * spacing;
-        float tickSize = spacing * xScreenToPlaneRatio() * TICK_SIZE_FACTOR;
-        for (float tick = firstTick; tick <= viewState.viewPlaneRect.to.x; tick += spacing)
+        
+        float firstTick = ceilf(viewState.viewPlaneRect.fr.x / spacingX) * spacingX;
+        for (float tick = firstTick; tick <= viewState.viewPlaneRect.to.x; tick += spacingX)
         {
             if (cmpf(tick, 0.0f) == 0)
                 continue;
 
             Vector2 tickPos = getScreenPosition((Vector2){tick, 0.0});
-            DrawLine(tickPos.x, tickPos.y - tickSize, tickPos.x, tickPos.y + tickSize, axisColor); // Draw the tick
+            DrawLine(tickPos.x, tickPos.y - tickSizeX, tickPos.x, tickPos.y + tickSizeX, axisColor); // Draw the tick
             snprintf(buffer, sizeof(buffer), "%.0f", tick);
-            int textHeight = (int)tickSize * 2;
             int textWidth = MeasureText(buffer, textHeight);
-            DrawText(buffer, tickPos.x - 0.5f * textWidth, tickPos.y - textHeight - tickSize - 1, textHeight, axisNumberColor); // Draw the tick number
+            // Draw the tick number
+            DrawText(buffer, tickPos.x - 0.5f * textWidth, tickPos.y - textHeight - tickSizeX - 1, textHeight, axisNumberColor);
         }
     }
 
     // Draw Y axis
-    if (viewState.viewPlaneRect.fr.x <= 0.0 && viewState.viewPlaneRect.to.x >= 0.0)
+    if (isYAxisVisible)
     {
         Vector2 a = getScreenPosition((Vector2){0.0, viewState.viewPlaneRect.fr.y});
         Vector2 b = getScreenPosition((Vector2){0.0, viewState.viewPlaneRect.to.y});
         DrawLineV(a, b, axisColor);
 
-        float spacing = findAxisTickSpacing(viewState.viewPlaneRect.to.y - viewState.viewPlaneRect.fr.y);
-        float firstTick = ceilf(viewState.viewPlaneRect.fr.y / spacing) * spacing;
-        float tickSize = spacing * yScreenToPlaneRatio() * TICK_SIZE_FACTOR;
-        for (float tick = firstTick; tick <= viewState.viewPlaneRect.to.y; tick += spacing)
+        float firstTick = ceilf(viewState.viewPlaneRect.fr.y / spacingY) * spacingY;
+        for (float tick = firstTick; tick <= viewState.viewPlaneRect.to.y; tick += spacingY)
         {
             if (cmpf(tick, 0.0f) == 0)
                 continue;
 
             Vector2 tickPos = getScreenPosition((Vector2){0.0, tick});
-            DrawLine(tickPos.x - tickSize, tickPos.y, tickPos.x + tickSize, tickPos.y, axisColor); // Draw the tick
+            DrawLine(tickPos.x - tickSizeY, tickPos.y, tickPos.x + tickSizeY, tickPos.y, axisColor); // Draw the tick
             snprintf(buffer, sizeof(buffer), "%.0f", tick);
-            int textHeight = (int)tickSize * 2;
-            DrawText(buffer, tickPos.x + tickSize + 1, tickPos.y - textHeight / 2.0f, textHeight, axisNumberColor); // Draw the tick number
+            // Draw the tick number
+            DrawText(buffer, tickPos.x + tickSizeY + 1, tickPos.y - textHeight / 2.0f, textHeight, axisNumberColor);
         }
     }
 }
@@ -233,7 +247,7 @@ void draw()
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
-    drawCartesianAxes();
+    drawCartesianPlaneAxes();
     DrawLineV(a, b, RED);
     drawLatticePointCloseToMouse();
     EndDrawing();
