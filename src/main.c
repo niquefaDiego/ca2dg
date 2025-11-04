@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <limits.h>
 #include <stdint.h>
+#include <math.h>
 #include "raylib.h"
 #include "raymath.h"
 
@@ -65,6 +66,7 @@ void setScreenSize(int width, int height)
 
 // ----- View render funcitions -----
 
+// Get screen position given cartesian plane position
 Vector2 getScreenPosition(Vector2 p)
 {
     p.x = Normalize(p.x, viewState.viewPlaneRect.fr.x, viewState.viewPlaneRect.to.x);
@@ -72,6 +74,28 @@ Vector2 getScreenPosition(Vector2 p)
     p.x = Lerp(windowState.canvasRect.fr.x, windowState.canvasRect.to.x, p.x);
     p.y = Lerp(windowState.canvasRect.fr.y, windowState.canvasRect.to.y, p.y);
     return p;
+}
+
+// Get cartesian plane position given screen position
+Vector2 getPlanePosition(Vector2 p)
+{
+    p.x = Normalize(p.x, windowState.canvasRect.fr.x, windowState.canvasRect.to.x);
+    p.y = Normalize(p.y, windowState.canvasRect.fr.y, windowState.canvasRect.to.y);
+    p.x = Lerp(viewState.viewPlaneRect.fr.x, viewState.viewPlaneRect.to.x, p.x);
+    p.y = Lerp(viewState.viewPlaneRect.to.y, viewState.viewPlaneRect.fr.y, p.y);
+    return p;
+}
+
+float xScreenToPlaneRatio()
+{
+    return (windowState.canvasRect.to.x - windowState.canvasRect.fr.x)
+           / (viewState.viewPlaneRect.to.x - viewState.viewPlaneRect.fr.x);
+}
+
+float yScreenToPlaneRatio()
+{
+    return (windowState.canvasRect.to.y - windowState.canvasRect.fr.y)
+           / (viewState.viewPlaneRect.to.y - viewState.viewPlaneRect.fr.y);
 }
 
 float findAxisTickSpacing(float size)
@@ -102,7 +126,7 @@ void drawCartesianAxes()
 
         float spacing = findAxisTickSpacing(viewState.viewPlaneRect.to.x - viewState.viewPlaneRect.fr.x);
         float firstTick = ceilf(viewState.viewPlaneRect.fr.x / spacing) * spacing;
-        float tickSize = spacing * TICK_SIZE_FACTOR;
+        float tickSize = spacing * xScreenToPlaneRatio() * TICK_SIZE_FACTOR;
         for (float tick = firstTick; tick <= viewState.viewPlaneRect.to.x; tick += spacing)
         {
             if (cmpf(tick, 0.0f) == 0)
@@ -111,7 +135,7 @@ void drawCartesianAxes()
             Vector2 tickPos = getScreenPosition((Vector2){tick, 0.0});
             DrawLine(tickPos.x, tickPos.y - tickSize, tickPos.x, tickPos.y + tickSize, axisColor); // Draw the tick
             snprintf(buffer, sizeof(buffer), "%.0f", tick);
-            int textHeight = (int)tickSize * 3;
+            int textHeight = (int)tickSize * 2;
             int textWidth = MeasureText(buffer, textHeight);
             DrawText(buffer, tickPos.x - 0.5f * textWidth, tickPos.y - textHeight - tickSize - 1, textHeight, axisNumberColor); // Draw the tick number
         }
@@ -126,7 +150,7 @@ void drawCartesianAxes()
 
         float spacing = findAxisTickSpacing(viewState.viewPlaneRect.to.y - viewState.viewPlaneRect.fr.y);
         float firstTick = ceilf(viewState.viewPlaneRect.fr.y / spacing) * spacing;
-        float tickSize = spacing * TICK_SIZE_FACTOR;
+        float tickSize = spacing * yScreenToPlaneRatio() * TICK_SIZE_FACTOR;
         for (float tick = firstTick; tick <= viewState.viewPlaneRect.to.y; tick += spacing)
         {
             if (cmpf(tick, 0.0f) == 0)
@@ -135,11 +159,31 @@ void drawCartesianAxes()
             Vector2 tickPos = getScreenPosition((Vector2){0.0, tick});
             DrawLine(tickPos.x - tickSize, tickPos.y, tickPos.x + tickSize, tickPos.y, axisColor); // Draw the tick
             snprintf(buffer, sizeof(buffer), "%.0f", tick);
-            int textHeight = (int)tickSize * 3;
+            int textHeight = (int)tickSize * 2;
             DrawText(buffer, tickPos.x + tickSize + 1, tickPos.y - textHeight / 2.0f, textHeight, axisNumberColor); // Draw the tick number
         }
     }
 }
+
+
+void drawLatticePointCloseToMouse() {
+    Vector2 mousePos = GetMousePosition();
+    Vector2 planePos = getPlanePosition(mousePos);
+
+    Vector2 latticePoint;
+    latticePoint.x = roundf(planePos.x);
+    latticePoint.y = roundf(planePos.y);
+
+    float dx = 1000.0 * fabsf((latticePoint.x - planePos.x) * xScreenToPlaneRatio()) / windowState.windowWidth;
+    float dy = 1000.0 * fabsf((latticePoint.y - planePos.y) * yScreenToPlaneRatio()) / windowState.windowHeight;
+    float distance = hypotf(dx, dy); // distance in pixels if the screen was 1000 pixels wide/high
+    if (distance < 8.0)
+    {
+        Vector2 screenPos = getScreenPosition(latticePoint);
+        DrawCircleV(screenPos, 5.0f, BLUE);
+    }
+}
+
 
 // ----- Main loop functions -----
 
@@ -148,14 +192,14 @@ void initialize()
     debugFile = fopen("debug.log", "w");
     debug("Initializing..");
 
-    setScreenSize(800, 450);
+    setScreenSize(800, 800);
 
-    viewState.viewPlaneRect.fr = (Vector2){-100.0, -100.0};
-    viewState.viewPlaneRect.to = (Vector2){300.0, 300.0};
+    viewState.viewPlaneRect.fr = (Vector2){-10.0, -10.0};
+    viewState.viewPlaneRect.to = (Vector2){20.0, 20.0};
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(windowState.windowWidth, windowState.windowHeight, "Computer Assisted 2D Geometry");
-    SetWindowMinSize(200, 100);
+    SetWindowMinSize(400, 400);
 
     SetTargetFPS(60);
 
@@ -181,8 +225,8 @@ void update()
 
 void draw()
 {
-    Vector2 a = {-50.0, -50.0};
-    Vector2 b = {100.0, 250.0};
+    Vector2 a = {-5.0, -8.0};
+    Vector2 b = {3.0, 13.0};
 
     a = getScreenPosition(a);
     b = getScreenPosition(b);
@@ -191,6 +235,7 @@ void draw()
     ClearBackground(RAYWHITE);
     drawCartesianAxes();
     DrawLineV(a, b, RED);
+    drawLatticePointCloseToMouse();
     EndDrawing();
 }
 
