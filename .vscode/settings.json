@@ -1,5 +1,9 @@
 {
-    "editor.tabSize": 2,
+    "editor.tabSize": 4,
     "editor.useTabStops": true,
-    "editor.detectIndentation": false
+    "editor.detectIndentation": false,
+    "files.associations": {
+        "raymath.h": "c",
+        "raylib.h": "c"
+    }
 }
