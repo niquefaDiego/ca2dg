@@ -20,7 +20,7 @@ typedef struct
 
 struct
 {
-  int windowWidgth;
+  int windowWidth;
   int windowHeight;
   Rect canvasRect;
 } windowState;
@@ -41,22 +41,27 @@ struct {
   int64_t frameCount;
 } metrics;
 
+void setScreenSize(int width, int height)
+{
+  windowState.windowWidth = width;
+  windowState.windowHeight = height;
+  windowState.canvasRect.fr = (Vector2){0.0, 0.0};
+  windowState.canvasRect.to = (Vector2){(float)width, (float)height};
+}
+
 void initialize()
 {
   debugFile = fopen("debug.log", "w");
   debug("Initializing..");
 
-  int windowWidgth = 800;
-  int windowHeight = 450;
-  windowState.windowWidgth = windowWidgth;
-  windowState.windowHeight = windowHeight;
-  windowState.canvasRect.fr = (Vector2){0.0, 0.0};
-  windowState.canvasRect.to = (Vector2){(float)windowState.windowWidgth, (float)windowState.windowHeight};
+  setScreenSize(800, 450);
 
   viewState.viewPlaneRect.fr = (Vector2){-100.0, -100.0};
   viewState.viewPlaneRect.to = (Vector2){300.0, 300.0};
 
-  InitWindow(windowWidgth, windowHeight, "Computer Assisted 2D Geometry");
+  SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+  InitWindow(windowState.windowWidth, windowState.windowHeight, "Computer Assisted 2D Geometry");
+  SetWindowMinSize(200, 100);
 
   SetTargetFPS(60);
 
@@ -75,12 +80,14 @@ void cleanUp()
   fclose(debugFile);
 }
 
+
+
 void update()
 {
-  // update your variables here
+  setScreenSize(GetScreenWidth(), GetScreenHeight());
 }
 
-Vector2 getScreenVec2(Vector2 p)
+Vector2 getScreenPosition(Vector2 p)
 {
   p.x = Normalize(p.x, viewState.viewPlaneRect.fr.x,  viewState.viewPlaneRect.to.x);
   p.y = Normalize(p.y, viewState.viewPlaneRect.to.y,  viewState.viewPlaneRect.fr.y);
@@ -110,8 +117,8 @@ void drawCartesianAxes()
   // Draw X axis
   if (viewState.viewPlaneRect.fr.y <= 0.0 && viewState.viewPlaneRect.to.y >= 0.0)
   {
-    Vector2 a = getScreenVec2((Vector2){viewState.viewPlaneRect.fr.x, 0.0});
-    Vector2 b = getScreenVec2((Vector2){viewState.viewPlaneRect.to.x, 0.0});
+    Vector2 a = getScreenPosition((Vector2){viewState.viewPlaneRect.fr.x, 0.0});
+    Vector2 b = getScreenPosition((Vector2){viewState.viewPlaneRect.to.x, 0.0});
     DrawLineV(a, b, axisColor);
 
     float spacing = findAxisTickSpacing(viewState.viewPlaneRect.to.x - viewState.viewPlaneRect.fr.x);
@@ -121,7 +128,7 @@ void drawCartesianAxes()
     {
       if (cmpf(tick, 0.0f) == 0) continue;
 
-      Vector2 tickPos = getScreenVec2((Vector2){tick, 0.0});
+      Vector2 tickPos = getScreenPosition((Vector2){tick, 0.0});
       DrawLine(tickPos.x, tickPos.y - tickSize, tickPos.x, tickPos.y + tickSize, axisColor); // Draw the tick
       snprintf(buffer, sizeof(buffer), "%.0f", tick);
       int textHeight = (int)tickSize*3;
@@ -133,8 +140,8 @@ void drawCartesianAxes()
   // Draw Y axis
   if (viewState.viewPlaneRect.fr.x <= 0.0 && viewState.viewPlaneRect.to.x >= 0.0)
   {
-    Vector2 a = getScreenVec2((Vector2){0.0, viewState.viewPlaneRect.fr.y});
-    Vector2 b = getScreenVec2((Vector2){0.0, viewState.viewPlaneRect.to.y});
+    Vector2 a = getScreenPosition((Vector2){0.0, viewState.viewPlaneRect.fr.y});
+    Vector2 b = getScreenPosition((Vector2){0.0, viewState.viewPlaneRect.to.y});
     DrawLineV(a, b, axisColor);
     
     float spacing = findAxisTickSpacing(viewState.viewPlaneRect.to.y - viewState.viewPlaneRect.fr.y);
@@ -144,7 +151,7 @@ void drawCartesianAxes()
     {
       if (cmpf(tick, 0.0f) == 0) continue;
 
-      Vector2 tickPos = getScreenVec2((Vector2){0.0, tick});
+      Vector2 tickPos = getScreenPosition((Vector2){0.0, tick});
       DrawLine(tickPos.x - tickSize, tickPos.y, tickPos.x + tickSize, tickPos.y, axisColor); // Draw the tick
       snprintf(buffer, sizeof(buffer), "%.0f", tick);
       int textHeight = (int)tickSize*3;
@@ -158,8 +165,8 @@ void draw()
   Vector2 a = {-50.0, -50.0};
   Vector2 b = {100.0, 250.0};
 
-  a = getScreenVec2(a);
-  b = getScreenVec2(b);
+  a = getScreenPosition(a);
+  b = getScreenPosition(b);
 
   BeginDrawing();
     ClearBackground(RAYWHITE);
