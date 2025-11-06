@@ -293,7 +293,6 @@ void RenderCoreState()
     }
 }
 
-
 // ----- Main loop functions -----
 
 void Initialize()
