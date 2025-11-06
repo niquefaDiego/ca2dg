@@ -8,24 +8,25 @@
 
 // ----- Utilities -----
 
-#define debug(...)                       \
+#define Debug(...)                       \
     {                                    \
-        fprintf(debugFile, __VA_ARGS__); \
-        fputs("\n", debugFile);          \
-        fflush(debugFile);               \
+        fprintf(DebugFile, __VA_ARGS__); \
+        fputs("\n", DebugFile);          \
+        fflush(DebugFile);               \
     }
 
-inline int cmpf(float a, float b)
+inline int Compare(double a, double b)
 {
     return a + EPSILON < b ? -1 : (b + EPSILON < a ? 1 : 0);
 }
 
-FILE *debugFile = NULL;
+FILE *DebugFile = NULL;
 
 // Dynamic array macros
 #define ListSize(da)               (da?((size_t*)da)[-1]:0)
 #define ListCapacity(da)           (da?((size_t*)da)[-2]:0)
 #define ListFree(da)               {if(da) free((size_t*)da - 2); da = NULL;}
+#define ListPop(da)                da[--(((size_t*)da)[-1])]
 #define ListPush(da, value) {                                                  \
         if(!da) {                                                              \
             size_t* _ptr = malloc(2 * sizeof(size_t) + 4 * sizeof(*(da)));     \
@@ -60,15 +61,15 @@ typedef struct
 {
     Point* points;
     LineSegment* segments;
-} GlobalCoreState;
+} CoreStateSingleton;
 
-GlobalCoreState coreState = {0};
+CoreStateSingleton CoreState = {0};
 
 size_t FindPoint(Point p) {
-    size_t nPoints = ListSize(coreState.points);
+    size_t nPoints = ListSize(CoreState.points);
     for (size_t i = 0; i < nPoints; i++) {
-        if (cmpf(coreState.points[i].x, p.x) == 0 &&
-            cmpf(coreState.points[i].y, p.y) == 0) {
+        if (Compare(CoreState.points[i].x, p.x) == 0 &&
+            Compare(CoreState.points[i].y, p.y) == 0) {
             return (int)i;
         }
     }
@@ -78,12 +79,12 @@ size_t FindPoint(Point p) {
 size_t AddPoint(Point p) {
     size_t index = FindPoint(p);
     if (index != SIZE_MAX) return (size_t)index;
-    ListPush(coreState.points, p);
-    return ListSize(coreState.points) - 1;
+    ListPush(CoreState.points, p);
+    return ListSize(CoreState.points) - 1;
 }
 
 void AddSegment(LineSegment s) {
-    ListPush(coreState.segments, s);
+    ListPush(CoreState.segments, s);
 }
 
 void InitializeCoreState()
@@ -96,10 +97,10 @@ void InitializeCoreState()
     AddSegment((LineSegment){.a=c, .b=d});
 }
 
-void FreeGlobalCoreState()
+void FreeCoreStateSingleton()
 {
-    free(coreState.points);
-    free(coreState.segments);
+    free(CoreState.points);
+    free(CoreState.segments);
 }
 
 // ----- View state -----
@@ -110,26 +111,30 @@ typedef struct
     Vector2 to;
 } Rect;
 
-struct
+typedef struct
 {
     int windowWidth;
     int windowHeight;
     Rect canvasRect;
-} WindowState;
+} WindowStateSingleton;
 
-struct
+typedef struct
 {
     // Rectangle of the cartesian plane being rendered
     Rect viewPlaneRect;
-} ViewState;
+} ViewStateSingleton;
 
-struct
-{
+WindowStateSingleton WindowState = {0};
+ViewStateSingleton ViewState = {0};
+
+typedef struct {
     int minFps;
     int maxFps;
     double avgFps;
     int64_t frameCount;
-} Metrics;
+} MetricsSingleton;
+
+MetricsSingleton Metrics = {0};
 
 void SetScreenSize(int width, int height)
 {
@@ -177,12 +182,12 @@ float YScreenToPlaneRatio()
            / (ViewState.viewPlaneRect.to.y - ViewState.viewPlaneRect.fr.y);
 }
 
-float findAxisTickSpacing(float size)
+float FindAxisTickSpacing(float size)
 {
-    int MAX_TICKS = 15;
+    const int maxTicks = 15;
     float step = 1;
     const float factor[] = {2, 2.5, 2};
-    for (size_t i = 0; step * factor[i] * MAX_TICKS < size; i = (i + 1) % 3)
+    for (size_t i = 0; step * factor[i] * maxTicks < size; i = (i + 1) % 3)
     {
         step *= factor[i];
     }
@@ -203,12 +208,12 @@ void RenderCartesianPlaneAxes()
     bool isXAxisVisible = ViewState.viewPlaneRect.fr.y <= 0.0 && ViewState.viewPlaneRect.to.y >= 0.0;
     bool isYAxisVisible = ViewState.viewPlaneRect.fr.x <= 0.0 && ViewState.viewPlaneRect.to.x >= 0.0;
     if (isXAxisVisible) {
-        spacingX = findAxisTickSpacing(ViewState.viewPlaneRect.to.x - ViewState.viewPlaneRect.fr.x);
+        spacingX = FindAxisTickSpacing(ViewState.viewPlaneRect.to.x - ViewState.viewPlaneRect.fr.x);
         tickSizeX = spacingX * XScreenToPlaneRatio() * TICK_SIZE_FACTOR;
         textHeight = (int)tickSizeX * 2;
     }
     if (isYAxisVisible) {
-        spacingY = findAxisTickSpacing(ViewState.viewPlaneRect.to.y - ViewState.viewPlaneRect.fr.y);
+        spacingY = FindAxisTickSpacing(ViewState.viewPlaneRect.to.y - ViewState.viewPlaneRect.fr.y);
         tickSizeY = spacingY * YScreenToPlaneRatio() * TICK_SIZE_FACTOR;
         if (textHeight == 0 || textHeight > (int)tickSizeY * 2)
             textHeight = (int)tickSizeY * 2;
@@ -224,7 +229,7 @@ void RenderCartesianPlaneAxes()
         float firstTick = ceilf(ViewState.viewPlaneRect.fr.x / spacingX) * spacingX;
         for (float tick = firstTick; tick <= ViewState.viewPlaneRect.to.x; tick += spacingX)
         {
-            if (cmpf(tick, 0.0f) == 0)
+            if (Compare(tick, 0.0f) == 0)
                 continue;
 
             Vector2 tickPos = ToVector2((Point){tick, 0.0});
@@ -246,7 +251,7 @@ void RenderCartesianPlaneAxes()
         float firstTick = ceilf(ViewState.viewPlaneRect.fr.y / spacingY) * spacingY;
         for (float tick = firstTick; tick <= ViewState.viewPlaneRect.to.y; tick += spacingY)
         {
-            if (cmpf(tick, 0.0f) == 0)
+            if (Compare(tick, 0.0f) == 0)
                 continue;
 
             Vector2 tickPos = ToVector2((Point){0.0, tick});
@@ -277,13 +282,13 @@ void RenderLatticePointCloseToMouse() {
 
 void RenderCoreState()
 {
-    size_t nSegments = ListSize(coreState.segments);
+    size_t nSegments = ListSize(CoreState.segments);
     for (size_t i = 0; i < nSegments; i++)
     {
-        LineSegment seg = coreState.segments[i];
-        Point a = coreState.points[seg.a];
-        Point b = coreState.points[seg.b];
-        debug("Drawing segment from (%f, %f) to (%f, %f)", a.x, a.y, b.x, b.y);
+        LineSegment seg = CoreState.segments[i];
+        Point a = CoreState.points[seg.a];
+        Point b = CoreState.points[seg.b];
+        Debug("Drawing segment from (%f, %f) to (%f, %f)", a.x, a.y, b.x, b.y);
         DrawLineV(ToVector2(a), ToVector2(b), RED);
     }
 }
@@ -293,8 +298,8 @@ void RenderCoreState()
 
 void Initialize()
 {
-    debugFile = fopen("debug.log", "w");
-    debug("Initializing..");
+    DebugFile = fopen("Debug.log", "w");
+    Debug("Initializing..");
 
     SetScreenSize(800, 800);
 
@@ -309,19 +314,19 @@ void Initialize()
     Metrics.minFps = INT_MAX;
 
     InitializeCoreState();
-    debug("Done initializing..");
+    Debug("Done initializing..");
 }
 
 void CleanUp()
 {
-    debug("Cleaning up..");
-    debug("Min FPS: %d", Metrics.minFps);
-    debug("Max FPS: %d", Metrics.maxFps);
-    debug("Avg FPS: %lf", Metrics.avgFps);
+    Debug("Cleaning up..");
+    Debug("Min FPS: %d", Metrics.minFps);
+    Debug("Max FPS: %d", Metrics.maxFps);
+    Debug("Avg FPS: %lf", Metrics.avgFps);
     CloseWindow();
-    FreeGlobalCoreState();
-    debug("Done cleaning up..");
-    fclose(debugFile);
+    FreeCoreStateSingleton();
+    Debug("Done cleaning up..");
+    fclose(DebugFile);
 }
 
 void Update()
