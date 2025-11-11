@@ -2,7 +2,9 @@
     "editor.tabSize": 4,
     "editor.useTabStops": true,
     "editor.detectIndentation": false,
+    "editor.rulers": [80],
     "files.associations": {
-        "*.h": "c"
+        "*.h": "c",
+        "*.c": "c"
     }
 }
