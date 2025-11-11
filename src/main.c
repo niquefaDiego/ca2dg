@@ -228,10 +228,27 @@ typedef struct
     Rect canvasRect;
 } WindowStateSingleton;
 
+typedef struct {
+    int type;
+    Point first;
+    Point second;
+    bool hasFirst;
+} SegmentInProgress;
+
+typedef union {
+    int type;
+    SegmentInProgress segment;
+} DrawingInProgressSingleton;
+
 typedef struct
 {
     // Rectangle of the cartesian plane being rendered
     Rect viewPlaneRect;
+    // The focus point is the point close to the mouse to be used
+    // when drawing shapes
+    bool hasFocusedPoint;
+    Point focusedPoint;
+    DrawingInProgressSingleton drawingInProgress;
 } ViewStateSingleton;
 
 WindowStateSingleton WindowState = {0};
@@ -247,15 +264,8 @@ typedef struct
 
 MetricsSingleton Metrics = {0};
 
-void SetScreenSize(int width, int height)
-{
-    WindowState.windowWidth = width;
-    WindowState.windowHeight = height;
-    WindowState.canvasRect.fr = (Vector2){0.0, 0.0};
-    WindowState.canvasRect.to = (Vector2){(float)width, (float)height};
-}
+// ----- Mapping functions ------
 
-// ----- View render funcitions -----
 
 // Get screen position given cartesian plane position
 Vector2 ToVector2(Point p)
@@ -296,6 +306,78 @@ float YScreenToPlaneRatio()
     return RectHeight(WindowState.canvasRect)
             / RectHeight(ViewState.viewPlaneRect);
 }
+
+// ----- Update state functions ------
+
+void SetScreenSize(int width, int height)
+{
+    WindowState.windowWidth = width;
+    WindowState.windowHeight = height;
+    WindowState.canvasRect.fr = (Vector2){0.0, 0.0};
+    WindowState.canvasRect.to = (Vector2){(float)width, (float)height};
+}
+
+void HandleSegmentDrawing(Point p) {
+    Debug("Handling segment drawing!");
+    SegmentInProgress* inProgress = &ViewState.drawingInProgress.segment;
+    if (!inProgress->hasFirst) {
+        inProgress->first = p;
+        inProgress->hasFirst = true;
+    } else {
+        inProgress->second = p;
+        inProgress->hasFirst = false;
+        AddSegment((LineSegment){
+            AddPoint(inProgress->first),
+            AddPoint(inProgress->second)
+        });
+    }
+}
+
+bool TryGetFocusedPoint(Point* outPoint)
+{
+    Point mpos = ToPoint(GetMousePosition());
+    Point closestPoint;
+    double closestDistance = INFINITY;
+
+    double dx, dy, d;
+
+    // check lattice point nearest to the mouse position
+    Point latticePoint;
+    latticePoint.x = round(mpos.x);
+    latticePoint.y = round(mpos.y);
+
+    dx = fabs((latticePoint.x - mpos.x) * XScreenToPlaneRatio())
+            / WindowState.windowWidth;
+    dy = fabs((latticePoint.y - mpos.y) * YScreenToPlaneRatio())
+            / WindowState.windowHeight;
+    d = hypotf(dx, dy);
+    closestDistance = d;
+    closestPoint = latticePoint;
+    
+    // check all points in core state
+    size_t nPoints = ListSize(CoreState.points);
+    for (size_t i = 0; i < nPoints; i++) {
+        Point p = CoreState.points[i];
+        dx = fabs((p.x - mpos.x) * XScreenToPlaneRatio())
+                / WindowState.windowWidth;
+        dy = fabs((p.y - mpos.y) * YScreenToPlaneRatio())
+                / WindowState.windowHeight;
+        d = hypot(dx, dy);
+        if (d < closestDistance) {
+            closestPoint = p;
+            closestDistance = d;
+        }
+    }
+
+    if (closestDistance > 0.008) {
+        return false;
+    }
+    *outPoint = closestPoint;
+    return true;
+}
+
+
+// ----- View render funcitions -----
 
 float FindAxisTickSpacing(float size)
 {
@@ -385,58 +467,27 @@ void RenderCartesianPlaneAxes()
     }
 }
 
-bool TryGetFocusedPoint(Point* outPoint)
-{
-    Point mpos = ToPoint(GetMousePosition());
-    Point closestPoint;
-    double closestDistance = INFINITY;
-
-    double dx, dy, d;
-
-    // check lattice point nearest to the mouse position
-    Point latticePoint;
-    latticePoint.x = round(mpos.x);
-    latticePoint.y = round(mpos.y);
-
-    dx = fabs((latticePoint.x - mpos.x) * XScreenToPlaneRatio())
-            / WindowState.windowWidth;
-    dy = fabs((latticePoint.y - mpos.y) * YScreenToPlaneRatio())
-            / WindowState.windowHeight;
-    d = hypotf(dx, dy);
-    closestDistance = d;
-    closestPoint = latticePoint;
-    
-    // check all points in core state
-    size_t nPoints = ListSize(CoreState.points);
-    for (size_t i = 0; i < nPoints; i++) {
-        Point p = CoreState.points[i];
-        dx = fabs((p.x - mpos.x) * XScreenToPlaneRatio())
-                / WindowState.windowWidth;
-        dy = fabs((p.y - mpos.y) * YScreenToPlaneRatio())
-                / WindowState.windowHeight;
-        d = hypot(dx, dy);
-        if (d < closestDistance) {
-            closestPoint = p;
-            closestDistance = d;
-        }
-    }
-
-    if (closestDistance > 0.008) {
-        return false;
-    }
-    *outPoint = closestPoint;
-    return true;
-
-}
-
 void RenderFocusedPoint()
 {
-    Point point;
-    if (TryGetFocusedPoint(&point))
+    if (ViewState.hasFocusedPoint)
     {
-        Vector2 screenPos = ToVector2(point);
+        Vector2 screenPos = ToVector2(ViewState.focusedPoint);
         DrawCircleV(screenPos, 5.0f, BLUE);
     }
+}
+
+void RenderSegmentInProgress()
+{
+    const SegmentInProgress inProgress = ViewState.drawingInProgress.segment;
+    if (inProgress.hasFirst) {
+        DrawLineV(ToVector2(inProgress.first), GetMousePosition(), BLUE);
+    }
+    RenderFocusedPoint();
+}
+
+void RenderDrawingInProgress()
+{
+    RenderSegmentInProgress();
 }
 
 void RenderCoreState()
@@ -451,7 +502,7 @@ void RenderCoreState()
     }
 }
 
-// ----- Main loop functions -----
+// ----- Main functions -----
 
 void Initialize()
 {
@@ -490,6 +541,15 @@ void CleanUp()
 void Update()
 {
     SetScreenSize(GetScreenWidth(), GetScreenHeight());
+
+    ViewState.hasFocusedPoint = TryGetFocusedPoint(&ViewState.focusedPoint);
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && ViewState.hasFocusedPoint) {
+        HandleSegmentDrawing(ViewState.focusedPoint);
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        Debug("Mouse button released!");
+    }
 }
 
 void Draw()
@@ -498,7 +558,7 @@ void Draw()
     ClearBackground(RAYWHITE);
     RenderCartesianPlaneAxes();
     RenderCoreState();
-    RenderFocusedPoint();
+    RenderDrawingInProgress();
     DrawFPS(5, 5);
     EndDrawing();
 }
@@ -511,6 +571,8 @@ void GatherMetrics()
     Metrics.frameCount++;
     Metrics.avgFps += (fps - Metrics.avgFps) / Metrics.frameCount;
 }
+
+// ----- Main -----
 
 int main(void)
 {
