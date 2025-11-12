@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "raylib.h"
 #include "raymath.h"
 
@@ -58,6 +59,12 @@ typedef struct
     double y;
 } Point;
 
+typedef struct
+{
+    Point c;
+    double r;
+} Circle;
+
 inline Point Add(const Point a, const Point b)
 {
     return (Point){.x = a.x + b.x, .y = a.y + b.y};
@@ -71,6 +78,11 @@ inline Point Subtract(const Point a, const Point b)
 inline Point Scale(const Point a, double s)
 {
     return (Point){.x = a.x * s, .y = a.y * s};
+}
+
+inline double Distance(const Point a, const Point b)
+{
+    return hypot(a.x-b.x, a.y-b.y);
 }
 
 inline double Cross(const Point a, const Point b)
@@ -121,17 +133,16 @@ bool TryFindSegmentInnerIntersection(
 
 typedef struct
 {
-    size_t a;
-    size_t b;
+    Point a;
+    Point b;
 } LineSegment;
 
-typedef struct
+struct
 {
     Point* points;
     LineSegment* segments;
-} CoreStateSingleton;
-
-CoreStateSingleton CoreState = {0};
+    Circle* circles;
+} CoreState = {0};
 
 size_t FindPoint(Point p)
 {
@@ -155,49 +166,60 @@ size_t AddPoint(Point p)
 
 void AddSegment(LineSegment s)
 {
+    // TODO: Validate the segment don't already exists
     #define segmentList CoreState.segments
-    #define pointList CoreState.points
     for (size_t i = 0; i < ListSize(segmentList); i++) {
         Point p;
         bool foundIntersection = TryFindSegmentInnerIntersection(
-            pointList[s.a], pointList[s.b],
-            pointList[segmentList[i].a], pointList[segmentList[i].b],
-            &p);
-            if (foundIntersection) {
-                Debug("Found segment intersection at (%f, %f)", p.x, p.y);
-                AddPoint(p);
-            }
+            s.a, s.b, segmentList[i].a, segmentList[i].b, &p
+        );
+        if (foundIntersection) {
+            Debug("Found segment intersection at (%f, %f)", p.x, p.y);
+            AddPoint(p);
         }
+    }
     ListPush(segmentList, s);
     #undef segmentList
-    #undef pointList
+    AddPoint(s.a);
+    AddPoint(s.b);
+}
+
+void AddCircle(Circle c)
+{
+    // TODO: Validate the segment don't already exists
+    AddPoint(c.c);
+    Debug("Adding circle c=(%f,%f), r=%f\n", c.c.x, c.c.y, c.r);
+    #define circleList CoreState.circles
+    // TODO: Find intersections with existing figures
+    ListPush(CoreState.circles, c);
+    #undef circleList
 }
 
 void InitializeCoreState()
 {
     AddSegment((LineSegment){
-        AddPoint((Point){.x= -5.0, .y=-8.0}),
-        AddPoint((Point){.x= 8.0,  .y=13.0})
+        (Point){.x= -5.0, .y=-8.0},
+        (Point){.x= 8.0,  .y=13.0}
     });
     AddSegment((LineSegment){
-        AddPoint((Point){.x= 5.0,  .y=5.0 }),
-        AddPoint((Point){.x= 5.0,  .y=10.0})
+        (Point){.x= 5.0,  .y=5.0 },
+        (Point){.x= 5.0,  .y=10.0}
     });
     AddSegment((LineSegment){
-        AddPoint((Point){.x= -1.5,  .y=5.3 }),
-        AddPoint((Point){.x= 6.5,  .y=-4.7})
+        (Point){.x= -1.5,  .y=5.3},
+        (Point){.x= 6.5,  .y=-4.7}
     });
     AddSegment((LineSegment){
-        AddPoint((Point){.x= -1,  .y=-1 }),
-        AddPoint((Point){.x= -2,  .y=-2})
+        (Point){.x= -1,  .y=-1 },
+        (Point){.x= -2,  .y=-2}
     });
     AddSegment((LineSegment){
-        AddPoint((Point){.x= -1,  .y=-2 }),
-        AddPoint((Point){.x= -2,  .y=-1})
+        (Point){.x= -1,  .y=-2 },
+        (Point){.x= -2,  .y=-1}
     });
 }
 
-void FreeCoreStateSingleton()
+void FreeCoreState()
 {
     free(CoreState.points);
     free(CoreState.segments);
@@ -221,12 +243,12 @@ inline float RectHeight(Rect r)
     return r.to.y - r.fr.y;
 }
 
-typedef struct
+struct
 {
     int windowWidth;
     int windowHeight;
     Rect canvasRect;
-} WindowStateSingleton;
+} WindowState = {0};
 
 typedef struct {
     int type;
@@ -235,12 +257,23 @@ typedef struct {
     bool hasFirst;
 } SegmentInProgress;
 
+typedef struct {
+    int type;
+    Point center;
+    Point boundaryPoint;
+    bool hasCenter;
+} CircleInProgress;
+
+#define DRAWING_SEGMENT 0
+#define DRAWING_CIRCLE 1
+
 typedef union {
     int type;
     SegmentInProgress segment;
-} DrawingInProgressSingleton;
+    CircleInProgress circle;
+} DrawingInProgress;
 
-typedef struct
+struct
 {
     // Rectangle of the cartesian plane being rendered
     Rect viewPlaneRect;
@@ -248,21 +281,16 @@ typedef struct
     // when drawing shapes
     bool hasFocusedPoint;
     Point focusedPoint;
-    DrawingInProgressSingleton drawingInProgress;
-} ViewStateSingleton;
+    DrawingInProgress inProgress;
+} ViewState = {0};
 
-WindowStateSingleton WindowState = {0};
-ViewStateSingleton ViewState = {0};
-
-typedef struct
+struct
 {
     int minFps;
     int maxFps;
     double avgFps;
     int64_t frameCount;
-} MetricsSingleton;
-
-MetricsSingleton Metrics = {0};
+} Metrics = {0};
 
 // ----- Mapping functions ------
 
@@ -317,9 +345,9 @@ void SetScreenSize(int width, int height)
     WindowState.canvasRect.to = (Vector2){(float)width, (float)height};
 }
 
-void HandleSegmentDrawing(Point p) {
+void HandleSegmentDrawingInProgress(Point p) {
     Debug("Handling segment drawing!");
-    SegmentInProgress* inProgress = &ViewState.drawingInProgress.segment;
+    SegmentInProgress* inProgress = &ViewState.inProgress.segment;
     if (!inProgress->hasFirst) {
         inProgress->first = p;
         inProgress->hasFirst = true;
@@ -327,9 +355,43 @@ void HandleSegmentDrawing(Point p) {
         inProgress->second = p;
         inProgress->hasFirst = false;
         AddSegment((LineSegment){
-            AddPoint(inProgress->first),
-            AddPoint(inProgress->second)
+            inProgress->first,
+            inProgress->second
         });
+    }
+}
+
+void HandleCircleDrawingInProgress(Point p) {
+    Debug("Handling segment drawing!");
+    CircleInProgress* inProgress = &ViewState.inProgress.circle;
+    if (!inProgress->hasCenter) {
+        inProgress->center = p;
+        inProgress->hasCenter = true;
+    } else {
+        inProgress->boundaryPoint = p;
+        inProgress->hasCenter = false;
+        Debug("Center = (%f,%f), BoundaryPoint = (%f,%f)",
+            inProgress->center.x,
+            inProgress->center.y,
+            p.x,
+            p.y);
+        AddCircle((Circle){
+            .c = inProgress->center,
+            .r = Distance(inProgress->center, inProgress->boundaryPoint)
+        });
+    }
+}
+
+void HandleDrawingInProgress(Point p) {
+    switch (ViewState.inProgress.type) {
+        case DRAWING_SEGMENT:
+            HandleSegmentDrawingInProgress(p);
+            break;
+        case DRAWING_CIRCLE:
+            HandleCircleDrawingInProgress(p);
+            break;
+        default:
+            assert(false);
     }
 }
 
@@ -478,16 +540,34 @@ void RenderFocusedPoint()
 
 void RenderSegmentInProgress()
 {
-    const SegmentInProgress inProgress = ViewState.drawingInProgress.segment;
+    const SegmentInProgress inProgress = ViewState.inProgress.segment;
     if (inProgress.hasFirst) {
         DrawLineV(ToVector2(inProgress.first), GetMousePosition(), BLUE);
     }
-    RenderFocusedPoint();
+}
+
+void RenderCircleInProgress() {
+    const CircleInProgress inProgress = ViewState.inProgress.circle;
+    if (inProgress.hasCenter) {
+        Vector2 c = ToVector2(inProgress.center);
+        double r = Vector2Distance(c, GetMousePosition());
+        DrawCircleLinesV(c, r, BLUE);
+    }
 }
 
 void RenderDrawingInProgress()
 {
-    RenderSegmentInProgress();
+    switch (ViewState.inProgress.type) {
+        case DRAWING_SEGMENT:
+            RenderSegmentInProgress();
+            break;
+        case DRAWING_CIRCLE:
+            RenderCircleInProgress();
+            break;
+        default:
+            assert(false);
+    }
+    RenderFocusedPoint();
 }
 
 void RenderCoreState()
@@ -496,9 +576,19 @@ void RenderCoreState()
     for (size_t i = 0; i < nSegments; i++)
     {
         LineSegment seg = CoreState.segments[i];
-        Point a = CoreState.points[seg.a];
-        Point b = CoreState.points[seg.b];
-        DrawLineV(ToVector2(a), ToVector2(b), RED);
+        DrawLineV(ToVector2(seg.a), ToVector2(seg.b), RED);
+    }
+    size_t nCircles = ListSize(CoreState.circles);
+    for (size_t i = 0; i < nCircles; i++)
+    {
+        Circle o = CoreState.circles[i];
+        // point in boundary of the circle
+        Point bPoint = (Point){.x = o.c.x, .y = o.c.y+o.r};
+        // center point
+        Vector2 c = ToVector2(o.c);
+        // radius in pixels
+        float r = Vector2Distance(c, ToVector2(bPoint));
+        DrawCircleLinesV(c, r, RED);
     }
 }
 
@@ -513,7 +603,6 @@ void Initialize()
 
     ViewState.viewPlaneRect.fr = (Vector2){-10.0, -10.0};
     ViewState.viewPlaneRect.to = (Vector2){20.0, 20.0};
-
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
     const char* title = "Geometry fun!";
     InitWindow(WindowState.windowWidth, WindowState.windowHeight, title);
@@ -533,7 +622,7 @@ void CleanUp()
     Debug("Max FPS: %d", Metrics.maxFps);
     Debug("Avg FPS: %lf", Metrics.avgFps);
     CloseWindow();
-    FreeCoreStateSingleton();
+    FreeCoreState();
     Debug("Done cleaning up..");
     fclose(DebugFile);
 }
@@ -545,10 +634,17 @@ void Update()
     ViewState.hasFocusedPoint = TryGetFocusedPoint(&ViewState.focusedPoint);
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && ViewState.hasFocusedPoint) {
-        HandleSegmentDrawing(ViewState.focusedPoint);
+        HandleDrawingInProgress(ViewState.focusedPoint);
     }
-    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-        Debug("Mouse button released!");
+    // if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {}
+    if (IsKeyPressed(KEY_S)) {
+        Debug("Go to segment drawing!");
+        ViewState.inProgress.type = DRAWING_SEGMENT;
+        ViewState.inProgress.segment.hasFirst = false;
+    } else if (IsKeyPressed(KEY_C)) {
+        Debug("Go to circle drawing!");
+        ViewState.inProgress.type = DRAWING_CIRCLE;
+        ViewState.inProgress.circle.hasCenter = false;
     }
 }
 

@@ -5,6 +5,7 @@
     "editor.rulers": [80],
     "files.associations": {
         "*.h": "c",
-        "*.c": "c"
+        "*.c": "c",
+        "random": "c"
     }
 }
