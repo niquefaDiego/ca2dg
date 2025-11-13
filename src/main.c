@@ -125,7 +125,7 @@ bool LineCutsSegment(Point a, Point b, Point c, Point d)
 
 // Returns true if segments ab and cd intersect in one point different from
 // their endpoints. If true, *outputPoint will be assigned the intersection.
-bool SegmentIntersection(Point a, Point b, Point c, Point d, Point* outPoint)
+bool SegmentIntersect(Point a, Point b, Point c, Point d, Point* outPoint)
 {
     if (!LineCutsSegment(a, b, c, d)) return false;
     if (!LineCutsSegment(c, d, a, b)) return false;
@@ -145,10 +145,10 @@ bool SegmentIntersection(Point a, Point b, Point c, Point d, Point* outPoint)
 // Returns the number of intersections between the segment ab and the
 // circle with center c and radius r.
 // a and b don't count as intersectin points.
-size_t CircleSegmentIntersection(Point c, double r, Point a, Point b, Point out[2])
+size_t CircleSegmentIntersect(Point c, double r, Point a, Point b, Point out[2])
 {
     Debug(
-        "Checking if circle c=(%f,%f), r=%f, intersects segment (%f,%f)-(%f,%f)",
+        "check circle-segment inteersect c=(%f,%f), r=%f, a=(%f,%f), b=(%f,%f)",
         c.x, c.y, r, a.x, a.y, b.x, b.y);
     const Point ab = Subtract(b, a);
     const Point ac = Subtract(c, a);
@@ -239,7 +239,7 @@ void AddSegment(LineSegment s)
     #define segmentList CoreState.segments
     for (size_t i = 0; i < ListSize(segmentList); i++) {
         Point p;
-        bool foundIntersection = SegmentIntersection(
+        bool foundIntersection = SegmentIntersect(
             s.a, s.b, segmentList[i].a, segmentList[i].b, &p
         );
         if (foundIntersection) {
@@ -249,7 +249,7 @@ void AddSegment(LineSegment s)
     }
     for (size_t i = 0; i < ListSize(circleList); i++) {
         Point intersections[2];
-        size_t count = CircleSegmentIntersection(
+        size_t count = CircleSegmentIntersect(
             circleList[i].c, circleList[i].r, s.a, s.b, intersections);
         if (count > 0) {
             for (size_t j = 0; j < count; j++) {
@@ -275,7 +275,7 @@ void AddCircle(Circle c)
     Point intersections[2];
     size_t count;
     for (size_t i = 0; i < ListSize(CoreState.segments); i++) {
-        count = CircleSegmentIntersection(
+        count = CircleSegmentIntersect(
             c.c, c.r, segmentList[i].a, segmentList[i].b, intersections);
         if (count > 0) {
             for (size_t j = 0; j < count; j++) {
