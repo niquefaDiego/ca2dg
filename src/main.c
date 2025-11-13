@@ -276,13 +276,24 @@ typedef union {
 struct
 {
     // Rectangle of the cartesian plane being rendered
-    Rect viewPlaneRect;
+    double viewWidth;
+    Point viewFr;
     // The focus point is the point close to the mouse to be used
     // when drawing shapes
     bool hasFocusedPoint;
     Point focusedPoint;
     DrawingInProgress inProgress;
 } ViewState = {0};
+
+inline double GetViewRectHeight() {
+    const Rect canvas = WindowState.canvasRect;
+    return ViewState.viewWidth / RectWidth(canvas) * RectHeight(canvas);
+}
+
+inline Point GetViewTo() {
+    return Add(ViewState.viewFr,
+            (Point){ViewState.viewWidth, GetViewRectHeight()});
+}
 
 struct
 {
@@ -294,45 +305,39 @@ struct
 
 // ----- Mapping functions ------
 
-
 // Get screen position given cartesian plane position
 Vector2 ToVector2(Point p)
 {
-    const Rect viewRect = ViewState.viewPlaneRect;
-    const Rect canvasRect = WindowState.canvasRect;
+    const Point viewFr = ViewState.viewFr;
+    const Point viewTo = GetViewTo();
+    const Rect canvas = WindowState.canvasRect;
     Vector2 r = {
-        .x = Normalize(p.x, viewRect.fr.x, viewRect.to.x),
-        .y = Normalize(p.y, viewRect.to.y, viewRect.fr.y)
+        .x = Normalize(p.x, viewFr.x, viewTo.x),
+        .y = Normalize(p.y, viewTo.y, viewFr.y)
     };
-    r.x = Lerp(canvasRect.fr.x, canvasRect.to.x, r.x);
-    r.y = Lerp(canvasRect.fr.y, canvasRect.to.y, r.y);
+    r.x = Lerp(canvas.fr.x, canvas.to.x, r.x);
+    r.y = Lerp(canvas.fr.y, canvas.to.y, r.y);
     return r;
 }
 
 // Get cartesian plane position given screen position
 Point ToPoint(Vector2 p)
 {
-    const Rect viewRect = ViewState.viewPlaneRect;
-    const Rect canvasRect = WindowState.canvasRect;
+    const Point viewFr = ViewState.viewFr;
+    const Point viewTo = GetViewTo();
+    const Rect canvas = WindowState.canvasRect;
     Point r = {
-        .x = Normalize(p.x, canvasRect.fr.x, canvasRect.to.x),
-        .y = Normalize(p.y, canvasRect.fr.y, canvasRect.to.y)
+        .x = Normalize(p.x, canvas.fr.x, canvas.to.x),
+        .y = Normalize(p.y, canvas.fr.y, canvas.to.y)
     };
-    r.x = Lerp(viewRect.fr.x, viewRect.to.x, r.x);
-    r.y = Lerp(viewRect.to.y, viewRect.fr.y, r.y);
+    r.x = Lerp(viewFr.x, viewTo.x, r.x);
+    r.y = Lerp(viewTo.y, viewFr.y, r.y);
     return r;
 }
 
-float XScreenToPlaneRatio()
+float ScreenToPlaneRatio()
 {
-    return RectWidth(WindowState.canvasRect)
-            / RectWidth(ViewState.viewPlaneRect);
-}
-
-float YScreenToPlaneRatio()
-{
-    return RectHeight(WindowState.canvasRect)
-            / RectHeight(ViewState.viewPlaneRect);
+    return RectWidth(WindowState.canvasRect) / ViewState.viewWidth;
 }
 
 // ----- Update state functions ------
@@ -341,8 +346,10 @@ void SetScreenSize(int width, int height)
 {
     WindowState.windowWidth = width;
     WindowState.windowHeight = height;
-    WindowState.canvasRect.fr = (Vector2){0.0, 0.0};
-    WindowState.canvasRect.to = (Vector2){(float)width, (float)height};
+
+    Rect* canvas = &WindowState.canvasRect;
+    canvas->fr = (Vector2){0.0, 0.0};
+    canvas->to = (Vector2){(float)width, (float)height};
 }
 
 void HandleSegmentDrawingInProgress(Point p) {
@@ -408,9 +415,9 @@ bool TryGetFocusedPoint(Point* outPoint)
     latticePoint.x = round(mpos.x);
     latticePoint.y = round(mpos.y);
 
-    dx = fabs((latticePoint.x - mpos.x) * XScreenToPlaneRatio())
+    dx = fabs((latticePoint.x - mpos.x) * ScreenToPlaneRatio())
             / WindowState.windowWidth;
-    dy = fabs((latticePoint.y - mpos.y) * YScreenToPlaneRatio())
+    dy = fabs((latticePoint.y - mpos.y) * ScreenToPlaneRatio())
             / WindowState.windowHeight;
     d = hypotf(dx, dy);
     closestDistance = d;
@@ -420,9 +427,9 @@ bool TryGetFocusedPoint(Point* outPoint)
     size_t nPoints = ListSize(CoreState.points);
     for (size_t i = 0; i < nPoints; i++) {
         Point p = CoreState.points[i];
-        dx = fabs((p.x - mpos.x) * XScreenToPlaneRatio())
+        dx = fabs((p.x - mpos.x) * ScreenToPlaneRatio())
                 / WindowState.windowWidth;
-        dy = fabs((p.y - mpos.y) * YScreenToPlaneRatio())
+        dy = fabs((p.y - mpos.y) * ScreenToPlaneRatio())
                 / WindowState.windowHeight;
         d = hypot(dx, dy);
         if (d < closestDistance) {
@@ -462,35 +469,37 @@ void RenderCartesianPlaneAxes()
     char buffer[32];
 
     // Calculate tick spacing, size and text height
-    float spacingY, tickSizeY, spacingX, tickSizeX;
-    int textHeight = 0;
-    const Rect viewRect = ViewState.viewPlaneRect;
-    bool isXAxisVisible = viewRect.fr.y <= 0.0 && viewRect.to.y >= 0.0;
-    bool isYAxisVisible = viewRect.fr.x <= 0.0 && viewRect.to.x >= 0.0;
+    float spacing = 0;
+    Point viewFr = ViewState.viewFr;
+    Point viewTo = GetViewTo();
+    bool isXAxisVisible = viewFr.y <= 0.0 && viewTo.y >= 0.0;
+    bool isYAxisVisible = viewFr.x <= 0.0 && viewTo.x >= 0.0;
     if (isXAxisVisible) {
-        spacingX = FindAxisTickSpacing(RectWidth(viewRect));
-        tickSizeX = spacingX * XScreenToPlaneRatio() * TICK_SIZE_FACTOR;
-        textHeight = (int)tickSizeX * 2;
+        spacing = FindAxisTickSpacing(ViewState.viewWidth);
     }
     if (isYAxisVisible) {
-        spacingY = FindAxisTickSpacing(RectHeight(viewRect));
-        tickSizeY = spacingY * YScreenToPlaneRatio() * TICK_SIZE_FACTOR;
-        if (textHeight == 0 || textHeight > (int)tickSizeY * 2)
-            textHeight = (int)tickSizeY * 2;
+        float spacingY = FindAxisTickSpacing(GetViewRectHeight());
+        if (spacing < spacingY) spacing = spacingY;
     }
 
+    // none of the axis are visible
+    if (Compare(spacing,0.0) == 0) return;
+
+    float tickSize = spacing * ScreenToPlaneRatio() * TICK_SIZE_FACTOR;
+    int textHeight = (int)tickSize * 2;
+
     if (isXAxisVisible) { // Draw X axis
-        Vector2 a = ToVector2((Point){viewRect.fr.x, 0.0});
-        Vector2 b = ToVector2((Point){viewRect.to.x, 0.0});
+        Vector2 a = ToVector2((Point){viewFr.x, 0.0});
+        Vector2 b = ToVector2((Point){viewTo.x, 0.0});
         DrawLineV(a, b, axisColor);
-        float firstTick = ceilf(viewRect.fr.x / spacingX) * spacingX;
-        for (float tick = firstTick; tick <= viewRect.to.x; tick += spacingX) {
+        float firstTick = ceilf(viewFr.x / spacing) * spacing;
+        for (float tick = firstTick; tick <= viewTo.x; tick += spacing) {
             if (Compare(tick, 0.0f) == 0) continue;
             // Draw the tick
             Vector2 tickPos = ToVector2((Point){tick, 0.0});
             DrawLine(
-                tickPos.x, tickPos.y - tickSizeX,
-                tickPos.x, tickPos.y + tickSizeX,
+                tickPos.x, tickPos.y - tickSize,
+                tickPos.x, tickPos.y + tickSize,
                 axisColor);
             // Draw the tick number
             snprintf(buffer, sizeof(buffer), "%.0f", tick);
@@ -498,30 +507,30 @@ void RenderCartesianPlaneAxes()
             DrawText(
                 buffer,
                 tickPos.x - 0.5f * textWidth,
-                tickPos.y - textHeight - tickSizeX - 1,
+                tickPos.y - textHeight - tickSize - 1,
                 textHeight,
                 axisNumberColor);
         }
     }
 
     if (isYAxisVisible) { // Draw Y axis
-        Vector2 a = ToVector2((Point){0.0, viewRect.fr.y});
-        Vector2 b = ToVector2((Point){0.0, viewRect.to.y});
+        Vector2 a = ToVector2((Point){0.0, viewFr.y});
+        Vector2 b = ToVector2((Point){0.0, viewTo.y});
         DrawLineV(a, b, axisColor);
-        float firstTick = ceilf(viewRect.fr.y / spacingY) * spacingY;
-        for (float tick = firstTick; tick <= viewRect.to.y; tick += spacingY) {
+        float firstTick = ceilf(viewFr.y / spacing) * spacing;
+        for (float tick = firstTick; tick <= viewTo.y; tick += spacing) {
             if (Compare(tick, 0.0f) == 0) continue;
             // Draw the tick
             Vector2 tickPos = ToVector2((Point){0.0, tick});
             DrawLine(
-                tickPos.x - tickSizeY, tickPos.y,
-                tickPos.x + tickSizeY, tickPos.y,
+                tickPos.x - tickSize, tickPos.y,
+                tickPos.x + tickSize, tickPos.y,
                 axisColor);
             // Draw the tick number
             snprintf(buffer, sizeof(buffer), "%.0f", tick);
             DrawText(
                 buffer,
-                tickPos.x + tickSizeY + 1,
+                tickPos.x + tickSize + 1,
                 tickPos.y - textHeight / 2.0f,
                 textHeight,
                 axisNumberColor);
@@ -599,10 +608,10 @@ void Initialize()
     DebugFile = fopen("Debug.log", "w");
     Debug("Initializing..");
 
+    ViewState.viewFr = (Point){-10.0, -10.0};
+    ViewState.viewWidth = 30;
     SetScreenSize(800, 800);
 
-    ViewState.viewPlaneRect.fr = (Vector2){-10.0, -10.0};
-    ViewState.viewPlaneRect.to = (Vector2){20.0, 20.0};
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
     const char* title = "Geometry fun!";
     InitWindow(WindowState.windowWidth, WindowState.windowHeight, title);
@@ -675,8 +684,8 @@ int main(void)
     Initialize();
 
     while (!WindowShouldClose()) {
-        Update();
         Draw();
+        Update();
         GatherMetrics();
     }
 
