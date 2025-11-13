@@ -59,12 +59,6 @@ typedef struct
     double y;
 } Point;
 
-typedef struct
-{
-    Point c;
-    double r;
-} Circle;
-
 inline Point Add(const Point a, const Point b)
 {
     return (Point){.x = a.x + b.x, .y = a.y + b.y};
@@ -80,9 +74,29 @@ inline Point Scale(const Point a, double s)
     return (Point){.x = a.x * s, .y = a.y * s};
 }
 
+inline double Magnitude(const Point a)
+{
+    return hypot(a.x, a.y);
+}
+
 inline double Distance(const Point a, const Point b)
 {
     return hypot(a.x-b.x, a.y-b.y);
+}
+
+inline double DistanceSquared(const Point a, const Point b)
+{
+    return (a.x - b.x)*(a.x - b.x) + (a.y - b.y)*(a.y - b.y);
+}
+
+inline Point UnitVector(const Point a)
+{
+    return Scale(a, 1.0 / Magnitude(a));
+}
+
+inline double Dot(const Point a, const Point b)
+{
+    return a.x * b.x + a.y * b.y;
 }
 
 inline double Cross(const Point a, const Point b)
@@ -111,8 +125,7 @@ bool LineCutsSegment(Point a, Point b, Point c, Point d)
 
 // Returns true if segments ab and cd intersect in one point different from
 // their endpoints. If true, *outputPoint will be assigned the intersection.
-bool TryFindSegmentInnerIntersection(
-    Point a, Point b, Point c, Point d, Point* outPoint)
+bool SegmentIntersection(Point a, Point b, Point c, Point d, Point* outPoint)
 {
     if (!LineCutsSegment(a, b, c, d)) return false;
     if (!LineCutsSegment(c, d, a, b)) return false;
@@ -129,6 +142,53 @@ bool TryFindSegmentInnerIntersection(
     return true;
 }
 
+// Returns the number of intersections between the segment ab and the
+// circle with center c and radius r.
+// a and b don't count as intersectin points.
+size_t CircleSegmentIntersection(Point c, double r, Point a, Point b, Point out[2])
+{
+    Debug(
+        "Checking if circle c=(%f,%f), r=%f, intersects segment (%f,%f)-(%f,%f)",
+        c.x, c.y, r, a.x, a.y, b.x, b.y);
+    const Point ab = Subtract(b, a);
+    const Point ac = Subtract(c, a);
+    const double acDist = Magnitude(ac);
+    const double abDist = Magnitude(ab);
+    if (Compare(acDist, r) < 0 && Compare(abDist, r) < 0) {
+        Debug("Segment is fully inside the circle");
+        return 0; // segment is fully inside the circle
+    }
+    const Point abUnit = UnitVector(ab);
+    Debug("acDist = %f", acDist);
+    const Point p = Add(a, Scale(abUnit, Dot(abUnit,ac)));
+    Debug("p = (%f,%f)", p.x, p.y);
+    const double cpDistanceSquared = DistanceSquared(c, p);
+    const double rSquared = r*r;
+    const int cmp = Compare(cpDistanceSquared, rSquared);
+    if (cmp > 0) {
+        Debug("Line does not touch the circle");
+        return 0; // line ab does not touch the circle
+    }
+    if (cmp == 0) { // line ab touches the circle in one point
+        if (Sign(Dot(Subtract(a, p), Subtract(b, p))) == -1) {
+            Debug("intersection: (%f,%f)", p.x, p.y);
+            out[0] = p;
+            return 1;
+        }
+        Debug("Line touches the circle in one point outside the segment");
+        return 0;
+    }
+    const double d = sqrt(rSquared - cpDistanceSquared);
+    const Point p0 = Add(p, Scale(abUnit, d));
+    const Point p1 = Add(p, Scale(abUnit, -d));
+    Debug("p0 = (%f,%f)\np1=(%f,%f)",p0.x, p0.y, p1.x, p1.y);
+    int outLen = 0;
+    if (Sign(Dot(Subtract(a, p0), Subtract(b, p0))) == -1) out[outLen++] = p0;
+    if (Sign(Dot(Subtract(a, p1), Subtract(b, p1))) == -1) out[outLen++] = p1;
+    Debug("Line touches the circle in two points outside the segment");
+    return outLen;
+}
+
 // ----- Core state -----
 
 typedef struct
@@ -136,6 +196,12 @@ typedef struct
     Point a;
     Point b;
 } LineSegment;
+
+typedef struct
+{
+    Point c;
+    double r;
+} Circle;
 
 struct
 {
@@ -167,31 +233,60 @@ size_t AddPoint(Point p)
 void AddSegment(LineSegment s)
 {
     // TODO: Validate the segment don't already exists
+    AddPoint(s.a);
+    AddPoint(s.b);
+    #define circleList CoreState.circles
     #define segmentList CoreState.segments
     for (size_t i = 0; i < ListSize(segmentList); i++) {
         Point p;
-        bool foundIntersection = TryFindSegmentInnerIntersection(
+        bool foundIntersection = SegmentIntersection(
             s.a, s.b, segmentList[i].a, segmentList[i].b, &p
         );
         if (foundIntersection) {
-            Debug("Found segment intersection at (%f, %f)", p.x, p.y);
+            Debug("segment-segment at (%f, %f)", p.x, p.y);
             AddPoint(p);
+        }
+    }
+    for (size_t i = 0; i < ListSize(circleList); i++) {
+        Point intersections[2];
+        size_t count = CircleSegmentIntersection(
+            circleList[i].c, circleList[i].r, s.a, s.b, intersections);
+        if (count > 0) {
+            for (size_t j = 0; j < count; j++) {
+                Debug("sircle-segment itersection at: (%f,%f)",
+                        intersections[j].x, intersections[j].y);
+                AddPoint(intersections[j]);
+            }
         }
     }
     ListPush(segmentList, s);
     #undef segmentList
-    AddPoint(s.a);
-    AddPoint(s.b);
+    #undef circleList
 }
 
 void AddCircle(Circle c)
 {
     // TODO: Validate the segment don't already exists
     AddPoint(c.c);
-    Debug("Adding circle c=(%f,%f), r=%f\n", c.c.x, c.c.y, c.r);
+    Debug("Adding circle c=(%f,%f), r=%f", c.c.x, c.c.y, c.r);
     #define circleList CoreState.circles
+    #define segmentList CoreState.segments
     // TODO: Find intersections with existing figures
+    Point intersections[2];
+    size_t count;
+    for (size_t i = 0; i < ListSize(CoreState.segments); i++) {
+        count = CircleSegmentIntersection(
+            c.c, c.r, segmentList[i].a, segmentList[i].b, intersections);
+        if (count > 0) {
+            for (size_t j = 0; j < count; j++) {
+                Debug("sircle-segment itersection at: (%f,%f)",
+                        intersections[j].x, intersections[j].y);
+                AddPoint(intersections[j]);
+            }
+        }
+    }
     ListPush(CoreState.circles, c);
+    #undef segmentList
     #undef circleList
 }
 
@@ -216,6 +311,10 @@ void InitializeCoreState()
     AddSegment((LineSegment){
         (Point){.x= -1,  .y=-2 },
         (Point){.x= -2,  .y=-1}
+    });
+    AddCircle((Circle){
+        .c = (Point){.x = 3, .y = 1},
+        .r = 4
     });
 }
 
