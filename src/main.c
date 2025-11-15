@@ -59,9 +59,19 @@ typedef struct
     double y;
 } Point;
 
+inline bool SamePoint(const Point a, const Point b)
+{
+    return Compare(a.x, b.x) == 0 && Compare(a.y, b.y) == 0;
+}
+
 inline Point Add(const Point a, const Point b)
 {
     return (Point){.x = a.x + b.x, .y = a.y + b.y};
+}
+
+inline Point Add3(const Point a, const Point b, const Point c)
+{
+    return (Point){.x = a.x + b.x + c.x, .y = a.y + b.y + c.y};
 }
 
 inline Point Subtract(const Point a, const Point b)
@@ -84,14 +94,18 @@ inline double Distance(const Point a, const Point b)
     return hypot(a.x-b.x, a.y-b.y);
 }
 
-inline double DistanceSquared(const Point a, const Point b)
+inline double DistanceSqr(const Point a, const Point b)
 {
     return (a.x - b.x)*(a.x - b.x) + (a.y - b.y)*(a.y - b.y);
 }
 
-inline Point UnitVector(const Point a)
+inline Point Unit(const Point a)
 {
     return Scale(a, 1.0 / Magnitude(a));
+}
+
+inline Point RotCCW90(const Point a) {
+    return (Point){.x = -a.y, .y = a.x};
 }
 
 inline double Dot(const Point a, const Point b)
@@ -127,6 +141,7 @@ bool LineCutsSegment(Point a, Point b, Point c, Point d)
 // their endpoints. If true, *outputPoint will be assigned the intersection.
 bool SegmentIntersect(Point a, Point b, Point c, Point d, Point* outPoint)
 {
+    assert(!SamePoint(a, b) && !SamePoint(c, d));
     if (!LineCutsSegment(a, b, c, d)) return false;
     if (!LineCutsSegment(c, d, a, b)) return false;
 
@@ -147,6 +162,7 @@ bool SegmentIntersect(Point a, Point b, Point c, Point d, Point* outPoint)
 // a and b don't count as intersectin points.
 size_t CircleSegmentIntersect(Point c, double r, Point a, Point b, Point out[2])
 {
+    assert(!SamePoint(a, b));
     Debug(
         "check circle-segment inteersect c=(%f,%f), r=%f, a=(%f,%f), b=(%f,%f)",
         c.x, c.y, r, a.x, a.y, b.x, b.y);
@@ -158,13 +174,13 @@ size_t CircleSegmentIntersect(Point c, double r, Point a, Point b, Point out[2])
         Debug("Segment is fully inside the circle");
         return 0; // segment is fully inside the circle
     }
-    const Point abUnit = UnitVector(ab);
+    const Point abUnit = Unit(ab);
     Debug("acDist = %f", acDist);
     const Point p = Add(a, Scale(abUnit, Dot(abUnit,ac)));
     Debug("p = (%f,%f)", p.x, p.y);
-    const double cpDistanceSquared = DistanceSquared(c, p);
+    const double cpDistanceSqr = DistanceSqr(c, p);
     const double rSquared = r*r;
-    const int cmp = Compare(cpDistanceSquared, rSquared);
+    const int cmp = Compare(cpDistanceSqr, rSquared);
     if (cmp > 0) {
         Debug("Line does not touch the circle");
         return 0; // line ab does not touch the circle
@@ -178,7 +194,7 @@ size_t CircleSegmentIntersect(Point c, double r, Point a, Point b, Point out[2])
         Debug("Line touches the circle in one point outside the segment");
         return 0;
     }
-    const double d = sqrt(rSquared - cpDistanceSquared);
+    const double d = sqrt(rSquared - cpDistanceSqr);
     const Point p0 = Add(p, Scale(abUnit, d));
     const Point p1 = Add(p, Scale(abUnit, -d));
     Debug("p0 = (%f,%f)\np1=(%f,%f)",p0.x, p0.y, p1.x, p1.y);
@@ -187,6 +203,48 @@ size_t CircleSegmentIntersect(Point c, double r, Point a, Point b, Point out[2])
     if (Sign(Dot(Subtract(a, p1), Subtract(b, p1))) == -1) out[outLen++] = p1;
     Debug("Line touches the circle in two points outside the segment");
     return outLen;
+}
+
+
+// If the segments intersects in either exactly 1 or exactly 2 points, then
+// this function populates those intersection points in out. Returns the
+// number of populated points.
+size_t CircleIntersect(Point a, double r1, Point b, double r2, Point out[2])
+{
+    assert(Compare(r1, 0) > 0 && Compare(r2, 0) > 0);
+
+    if (SamePoint(a, b))
+        return 0; // circle are either equal or one completely inside the other
+
+    double d = Distance(a, b);
+    if (Compare(d, r1+r2) > 0)
+        return 0; // circles too far appart, no intersection
+    if (Compare(d, r1+r2) == 0) {
+        out[0] = Add(a, Scale(Subtract(b, a), r1 / (r1+r2)));
+        return 1; // circles are tangent, touching on exactly 1 point
+    }
+
+    // One circle is completely inside the other, not touching at all
+    if (Compare(d+r1, r2) < 0) return 0;
+    if (Compare(d+r2, r1) < 0) return 0;
+
+    if (Compare(d+r1, r2) == 0) {
+        out[0] = Add(a, Scale(Unit(Subtract(a, b)), r1));
+        return 1; // circle 1 is inside circle 2, they touch in eactly 1 point
+    }
+    if (Compare(d+r2, r1) == 0) {
+        out[0] = Add(b, Scale(Unit(Subtract(b, a)), r2));
+        return 1; // circle 2 is inside circle 1, they touch in eactly 1 point
+    }
+    
+    // circle touch in 2 points
+    const double x = (r1 * r1 + d * d - r2 * r2) / 2.0 / d;
+    const double y = sqrt(r1*r1 - x*x);
+    const Point vx = Unit(Subtract(b, a));
+    const Point vy = RotCCW90(vx);
+    out[0] = Add3(a, Scale(vx, x), Scale(vy, y));
+    out[1] = Add3(a, Scale(vx, x), Scale(vy, -y));
+    return 2;
 }
 
 // ----- Core state -----
@@ -213,12 +271,9 @@ struct
 size_t FindPoint(Point p)
 {
     size_t nPoints = ListSize(CoreState.points);
-    for (size_t i = 0; i < nPoints; i++) {
-        if (Compare(CoreState.points[i].x, p.x) == 0 &&
-            Compare(CoreState.points[i].y, p.y) == 0) {
-            return (int)i;
-        }
-    }
+    for (size_t i = 0; i < nPoints; i++)
+        if (SamePoint(CoreState.points[i], p))
+            return i;
     return SIZE_MAX;
 }
 
@@ -232,90 +287,89 @@ size_t AddPoint(Point p)
 
 void AddSegment(LineSegment s)
 {
-    // TODO: Validate the segment don't already exists
+    if (SamePoint(s.a, s.b)) {
+        Debug("Not adding segment with length 0"); // TODO: show toast
+        return;
+    }
     AddPoint(s.a);
     AddPoint(s.b);
-    #define circleList CoreState.circles
-    #define segmentList CoreState.segments
-    for (size_t i = 0; i < ListSize(segmentList); i++) {
+    #define circs CoreState.circles
+    #define segs CoreState.segments
+    for (size_t i = 0; i < ListSize(segs); i++)
+        if (SamePoint(s.a, segs[i].a) && SamePoint(s.b, segs[i].b)) {
+            Debug("Not adding duplicated segment"); // TODO: show toast
+            return;
+        }
+    for (size_t i = 0; i < ListSize(segs); i++) {
         Point p;
         bool foundIntersection = SegmentIntersect(
-            s.a, s.b, segmentList[i].a, segmentList[i].b, &p
+            s.a, s.b, segs[i].a, segs[i].b, &p
         );
         if (foundIntersection) {
             Debug("segment-segment at (%f, %f)", p.x, p.y);
             AddPoint(p);
         }
     }
-    for (size_t i = 0; i < ListSize(circleList); i++) {
-        Point intersections[2];
-        size_t count = CircleSegmentIntersect(
-            circleList[i].c, circleList[i].r, s.a, s.b, intersections);
-        if (count > 0) {
-            for (size_t j = 0; j < count; j++) {
-                Debug("sircle-segment itersection at: (%f,%f)",
-                        intersections[j].x, intersections[j].y);
-                AddPoint(intersections[j]);
-            }
+    for (size_t i = 0; i < ListSize(circs); i++) {
+        Point out[2];
+        size_t len;
+        len = CircleSegmentIntersect(circs[i].c, circs[i].r, s.a, s.b, out);
+        if (len == 0) continue;
+        for (size_t j = 0; j < len; j++) {
+            Debug("circle-segment itersection at: (%f,%f)", out[j].x, out[j].y);
+            AddPoint(out[j]);
         }
     }
-    ListPush(segmentList, s);
-    #undef segmentList
-    #undef circleList
+    ListPush(segs, s);
+    #undef segs
+    #undef circs
 }
 
 void AddCircle(Circle c)
 {
-    // TODO: Validate the segment don't already exists
-    AddPoint(c.c);
+    if (Compare(c.r, 0) == 0) {
+        Debug("Not circle with radius 0"); // TODO: show toast
+        return;
+    }
     Debug("Adding circle c=(%f,%f), r=%f", c.c.x, c.c.y, c.r);
-    #define circleList CoreState.circles
-    #define segmentList CoreState.segments
-    // TODO: Find intersections with existing figures
-    Point intersections[2];
-    size_t count;
-    for (size_t i = 0; i < ListSize(CoreState.segments); i++) {
-        count = CircleSegmentIntersect(
-            c.c, c.r, segmentList[i].a, segmentList[i].b, intersections);
-        if (count > 0) {
-            for (size_t j = 0; j < count; j++) {
-                Debug("sircle-segment itersection at: (%f,%f)",
-                        intersections[j].x, intersections[j].y);
-                AddPoint(intersections[j]);
-            }
+    #define circs CoreState.circles
+    #define segs CoreState.segments
+    
+    for (size_t i = 0; i < ListSize(circs); i++) {
+        if (SamePoint(circs[i].c, c.c) && Compare(circs[i].r, c.r) == 0) {
+            Debug("Not adding duplicated circle!"); // TODO: show toast
+            Debug("Same as existing circle %zu. c=(%f,%f), r=%f",
+                i, circs[i].c.x, circs[i].c.y, circs[i].r);
+            return;
         }
     }
-    ListPush(CoreState.circles, c);
-    #undef segmentList
-    #undef circleList
+    
+    AddPoint(c.c);
+    Point out[2];
+    size_t outLen;
+    for (size_t i = 0; i < ListSize(segs); i++) {
+        outLen = CircleSegmentIntersect(c.c, c.r, segs[i].a, segs[i].b, out);
+        if (!outLen) continue;
+        for (size_t j = 0; j < outLen; j++) {
+            Debug("circle-segment itersection at: (%f,%f)", out[j].x, out[j].y);
+            AddPoint(out[j]);
+        }
+    }
+    for (size_t i = 0; i < ListSize(circs); i++) {
+        outLen = CircleIntersect(c.c, c.r, circs[i].c, circs[i].r, out);
+        if (!outLen) continue;
+        for (size_t j = 0; j < outLen; j++) {
+            Debug("circle-circle itersection at: (%f,%f)", out[j].x, out[j].y);
+            AddPoint(out[j]);
+        }
+    }
+    ListPush(circs, c);
+    #undef segs
+    #undef circs
 }
 
 void InitializeCoreState()
 {
-    AddSegment((LineSegment){
-        (Point){.x= -5.0, .y=-8.0},
-        (Point){.x= 8.0,  .y=13.0}
-    });
-    AddSegment((LineSegment){
-        (Point){.x= 5.0,  .y=5.0 },
-        (Point){.x= 5.0,  .y=10.0}
-    });
-    AddSegment((LineSegment){
-        (Point){.x= -1.5,  .y=5.3},
-        (Point){.x= 6.5,  .y=-4.7}
-    });
-    AddSegment((LineSegment){
-        (Point){.x= -1,  .y=-1 },
-        (Point){.x= -2,  .y=-2}
-    });
-    AddSegment((LineSegment){
-        (Point){.x= -1,  .y=-2 },
-        (Point){.x= -2,  .y=-1}
-    });
-    AddCircle((Circle){
-        .c = (Point){.x = 3, .y = 1},
-        .r = 4
-    });
 }
 
 void FreeCoreState()
@@ -468,7 +522,7 @@ void HandleSegmentDrawingInProgress(Point p) {
 }
 
 void HandleCircleDrawingInProgress(Point p) {
-    Debug("Handling segment drawing!");
+    Debug("Handling circle drawing!");
     CircleInProgress* inProgress = &ViewState.inProgress.circle;
     if (!inProgress->hasCenter) {
         inProgress->center = p;
