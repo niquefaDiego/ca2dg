@@ -266,13 +266,13 @@ struct
     Point* points;
     LineSegment* segments;
     Circle* circles;
-} CoreState = {0};
+} Core = {0};
 
 size_t FindPoint(Point p)
 {
-    size_t nPoints = ListSize(CoreState.points);
+    size_t nPoints = ListSize(Core.points);
     for (size_t i = 0; i < nPoints; i++)
-        if (SamePoint(CoreState.points[i], p))
+        if (SamePoint(Core.points[i], p))
             return i;
     return SIZE_MAX;
 }
@@ -281,8 +281,8 @@ size_t AddPoint(Point p)
 {
     size_t index = FindPoint(p);
     if (index != SIZE_MAX) return (size_t)index;
-    ListPush(CoreState.points, p);
-    return ListSize(CoreState.points) - 1;
+    ListPush(Core.points, p);
+    return ListSize(Core.points) - 1;
 }
 
 void AddSegment(LineSegment s)
@@ -293,8 +293,8 @@ void AddSegment(LineSegment s)
     }
     AddPoint(s.a);
     AddPoint(s.b);
-    #define circs CoreState.circles
-    #define segs CoreState.segments
+    #define circs Core.circles
+    #define segs Core.segments
     for (size_t i = 0; i < ListSize(segs); i++)
         if (SamePoint(s.a, segs[i].a) && SamePoint(s.b, segs[i].b)) {
             Debug("Not adding duplicated segment"); // TODO: show toast
@@ -332,8 +332,8 @@ void AddCircle(Circle c)
         return;
     }
     Debug("Adding circle c=(%f,%f), r=%f", c.c.x, c.c.y, c.r);
-    #define circs CoreState.circles
-    #define segs CoreState.segments
+    #define circs Core.circles
+    #define segs Core.segments
     
     for (size_t i = 0; i < ListSize(circs); i++) {
         if (SamePoint(circs[i].c, c.c) && Compare(circs[i].r, c.r) == 0) {
@@ -368,14 +368,14 @@ void AddCircle(Circle c)
     #undef circs
 }
 
-void InitializeCoreState()
+void InitializeCore()
 {
 }
 
-void FreeCoreState()
+void FreeCore()
 {
-    free(CoreState.points);
-    free(CoreState.segments);
+    free(Core.points);
+    free(Core.segments);
 }
 
 // ----- View state -----
@@ -401,30 +401,30 @@ struct
     int windowWidth;
     int windowHeight;
     Rect canvasRect;
-} WindowState = {0};
+} Window = {0};
 
 typedef struct {
     int type;
     Point first;
     Point second;
     bool hasFirst;
-} SegmentInProgress;
+} DrawSegmentAction;
 
 typedef struct {
     int type;
     Point center;
     Point boundaryPoint;
     bool hasCenter;
-} CircleInProgress;
+} DrawCircleAction;
 
-#define DRAWING_SEGMENT 0
-#define DRAWING_CIRCLE 1
+#define ACTION_DRAW_SEGMENT 0
+#define ACTION_DRAW_CIRCLE 1
 
 typedef union {
     int type;
-    SegmentInProgress segment;
-    CircleInProgress circle;
-} DrawingInProgress;
+    DrawSegmentAction segment;
+    DrawCircleAction circle;
+} Action;
 
 struct
 {
@@ -435,17 +435,17 @@ struct
     // when drawing shapes
     bool hasFocusedPoint;
     Point focusedPoint;
-    DrawingInProgress inProgress;
-} ViewState = {0};
+    // Action in progress
+    Action action;
+} View = {0};
 
-inline double GetViewRectHeight() {
-    const Rect canvas = WindowState.canvasRect;
-    return ViewState.viewWidth / RectWidth(canvas) * RectHeight(canvas);
+inline double ViewRectHeight() {
+    const Rect canvas = Window.canvasRect;
+    return View.viewWidth / RectWidth(canvas) * RectHeight(canvas);
 }
 
-inline Point GetViewTo() {
-    return Add(ViewState.viewFr,
-            (Point){ViewState.viewWidth, GetViewRectHeight()});
+inline Point ViewTo() {
+    return Add(View.viewFr, (Point){View.viewWidth, ViewRectHeight()});
 }
 
 struct
@@ -461,9 +461,9 @@ struct
 // Get screen position given cartesian plane position
 Vector2 ToVector2(Point p)
 {
-    const Point viewFr = ViewState.viewFr;
-    const Point viewTo = GetViewTo();
-    const Rect canvas = WindowState.canvasRect;
+    const Point viewFr = View.viewFr;
+    const Point viewTo = ViewTo();
+    const Rect canvas = Window.canvasRect;
     Vector2 r = {
         .x = Normalize(p.x, viewFr.x, viewTo.x),
         .y = Normalize(p.y, viewTo.y, viewFr.y)
@@ -476,9 +476,9 @@ Vector2 ToVector2(Point p)
 // Get cartesian plane position given screen position
 Point ToPoint(Vector2 p)
 {
-    const Point viewFr = ViewState.viewFr;
-    const Point viewTo = GetViewTo();
-    const Rect canvas = WindowState.canvasRect;
+    const Point viewFr = View.viewFr;
+    const Point viewTo = ViewTo();
+    const Rect canvas = Window.canvasRect;
     Point r = {
         .x = Normalize(p.x, canvas.fr.x, canvas.to.x),
         .y = Normalize(p.y, canvas.fr.y, canvas.to.y)
@@ -490,65 +490,65 @@ Point ToPoint(Vector2 p)
 
 float ScreenToPlaneRatio()
 {
-    return RectWidth(WindowState.canvasRect) / ViewState.viewWidth;
+    return RectWidth(Window.canvasRect) / View.viewWidth;
 }
 
 // ----- Update state functions ------
 
 void SetScreenSize(int width, int height)
 {
-    WindowState.windowWidth = width;
-    WindowState.windowHeight = height;
+    Window.windowWidth = width;
+    Window.windowHeight = height;
 
-    Rect* canvas = &WindowState.canvasRect;
+    Rect* canvas = &Window.canvasRect;
     canvas->fr = (Vector2){0.0, 0.0};
     canvas->to = (Vector2){(float)width, (float)height};
 }
 
-void HandleSegmentDrawingInProgress(Point p) {
+void HandleDrawSegmentAction(Point p) {
     Debug("Handling segment drawing!");
-    SegmentInProgress* inProgress = &ViewState.inProgress.segment;
-    if (!inProgress->hasFirst) {
-        inProgress->first = p;
-        inProgress->hasFirst = true;
+    DrawSegmentAction* action = &View.action.segment;
+    if (!action->hasFirst) {
+        action->first = p;
+        action->hasFirst = true;
     } else {
-        inProgress->second = p;
-        inProgress->hasFirst = false;
+        action->second = p;
+        action->hasFirst = false;
         AddSegment((LineSegment){
-            inProgress->first,
-            inProgress->second
+            action->first,
+            action->second
         });
     }
 }
 
-void HandleCircleDrawingInProgress(Point p) {
+void HandleDrawCircleAction(Point p) {
     Debug("Handling circle drawing!");
-    CircleInProgress* inProgress = &ViewState.inProgress.circle;
-    if (!inProgress->hasCenter) {
-        inProgress->center = p;
-        inProgress->hasCenter = true;
+    DrawCircleAction* action = &View.action.circle;
+    if (!action->hasCenter) {
+        action->center = p;
+        action->hasCenter = true;
     } else {
-        inProgress->boundaryPoint = p;
-        inProgress->hasCenter = false;
+        action->boundaryPoint = p;
+        action->hasCenter = false;
         Debug("Center = (%f,%f), BoundaryPoint = (%f,%f)",
-            inProgress->center.x,
-            inProgress->center.y,
+            action->center.x,
+            action->center.y,
             p.x,
             p.y);
         AddCircle((Circle){
-            .c = inProgress->center,
-            .r = Distance(inProgress->center, inProgress->boundaryPoint)
+            .c = action->center,
+            .r = Distance(action->center, action->boundaryPoint)
         });
     }
 }
 
-void HandleDrawingInProgress(Point p) {
-    switch (ViewState.inProgress.type) {
-        case DRAWING_SEGMENT:
-            HandleSegmentDrawingInProgress(p);
+void HandleAction(Point p) {
+    switch (View.action.type) {
+        case ACTION_DRAW_SEGMENT:
+            HandleDrawSegmentAction(p);
             break;
-        case DRAWING_CIRCLE:
-            HandleCircleDrawingInProgress(p);
+        case ACTION_DRAW_CIRCLE:
+            HandleDrawCircleAction(p);
             break;
         default:
             assert(false);
@@ -569,21 +569,21 @@ bool TryGetFocusedPoint(Point* outPoint)
     latticePoint.y = round(mpos.y);
 
     dx = fabs((latticePoint.x - mpos.x) * ScreenToPlaneRatio())
-            / WindowState.windowWidth;
+            / Window.windowWidth;
     dy = fabs((latticePoint.y - mpos.y) * ScreenToPlaneRatio())
-            / WindowState.windowHeight;
+            / Window.windowHeight;
     d = hypotf(dx, dy);
     closestDistance = d;
     closestPoint = latticePoint;
     
     // check all points in core state
-    size_t nPoints = ListSize(CoreState.points);
+    size_t nPoints = ListSize(Core.points);
     for (size_t i = 0; i < nPoints; i++) {
-        Point p = CoreState.points[i];
+        Point p = Core.points[i];
         dx = fabs((p.x - mpos.x) * ScreenToPlaneRatio())
-                / WindowState.windowWidth;
+                / Window.windowWidth;
         dy = fabs((p.y - mpos.y) * ScreenToPlaneRatio())
-                / WindowState.windowHeight;
+                / Window.windowHeight;
         d = hypot(dx, dy);
         if (d < closestDistance) {
             closestPoint = p;
@@ -623,15 +623,15 @@ void RenderCartesianPlaneAxes()
 
     // Calculate tick spacing, size and text height
     float spacing = 0;
-    Point viewFr = ViewState.viewFr;
-    Point viewTo = GetViewTo();
+    Point viewFr = View.viewFr;
+    Point viewTo = ViewTo();
     bool isXAxisVisible = viewFr.y <= 0.0 && viewTo.y >= 0.0;
     bool isYAxisVisible = viewFr.x <= 0.0 && viewTo.x >= 0.0;
     if (isXAxisVisible) {
-        spacing = FindAxisTickSpacing(ViewState.viewWidth);
+        spacing = FindAxisTickSpacing(View.viewWidth);
     }
     if (isYAxisVisible) {
-        float spacingY = FindAxisTickSpacing(GetViewRectHeight());
+        float spacingY = FindAxisTickSpacing(ViewRectHeight());
         if (spacing < spacingY) spacing = spacingY;
     }
 
@@ -693,38 +693,38 @@ void RenderCartesianPlaneAxes()
 
 void RenderFocusedPoint()
 {
-    if (ViewState.hasFocusedPoint)
+    if (View.hasFocusedPoint)
     {
-        Vector2 screenPos = ToVector2(ViewState.focusedPoint);
+        Vector2 screenPos = ToVector2(View.focusedPoint);
         DrawCircleV(screenPos, 5.0f, BLUE);
     }
 }
 
-void RenderSegmentInProgress()
+void RenderDrawSegmentAction()
 {
-    const SegmentInProgress inProgress = ViewState.inProgress.segment;
-    if (inProgress.hasFirst) {
-        DrawLineV(ToVector2(inProgress.first), GetMousePosition(), BLUE);
+    const DrawSegmentAction action = View.action.segment;
+    if (action.hasFirst) {
+        DrawLineV(ToVector2(action.first), GetMousePosition(), BLUE);
     }
 }
 
-void RenderCircleInProgress() {
-    const CircleInProgress inProgress = ViewState.inProgress.circle;
-    if (inProgress.hasCenter) {
-        Vector2 c = ToVector2(inProgress.center);
+void RenderDrawCircleAction() {
+    const DrawCircleAction action = View.action.circle;
+    if (action.hasCenter) {
+        Vector2 c = ToVector2(action.center);
         double r = Vector2Distance(c, GetMousePosition());
         DrawCircleLinesV(c, r, BLUE);
     }
 }
 
-void RenderDrawingInProgress()
+void RenderAction()
 {
-    switch (ViewState.inProgress.type) {
-        case DRAWING_SEGMENT:
-            RenderSegmentInProgress();
+    switch (View.action.type) {
+        case ACTION_DRAW_SEGMENT:
+            RenderDrawSegmentAction();
             break;
-        case DRAWING_CIRCLE:
-            RenderCircleInProgress();
+        case ACTION_DRAW_CIRCLE:
+            RenderDrawCircleAction();
             break;
         default:
             assert(false);
@@ -732,18 +732,18 @@ void RenderDrawingInProgress()
     RenderFocusedPoint();
 }
 
-void RenderCoreState()
+void RenderCore()
 {
-    size_t nSegments = ListSize(CoreState.segments);
+    size_t nSegments = ListSize(Core.segments);
     for (size_t i = 0; i < nSegments; i++)
     {
-        LineSegment seg = CoreState.segments[i];
+        LineSegment seg = Core.segments[i];
         DrawLineV(ToVector2(seg.a), ToVector2(seg.b), RED);
     }
-    size_t nCircles = ListSize(CoreState.circles);
+    size_t nCircles = ListSize(Core.circles);
     for (size_t i = 0; i < nCircles; i++)
     {
-        Circle o = CoreState.circles[i];
+        Circle o = Core.circles[i];
         // point in boundary of the circle
         Point bPoint = (Point){.x = o.c.x, .y = o.c.y+o.r};
         // center point
@@ -761,19 +761,19 @@ void Initialize()
     DebugFile = fopen("Debug.log", "w");
     Debug("Initializing..");
 
-    ViewState.viewFr = (Point){-10.0, -10.0};
-    ViewState.viewWidth = 30;
+    View.viewFr = (Point){-10.0, -10.0};
+    View.viewWidth = 30;
     SetScreenSize(800, 800);
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
     const char* title = "Geometry fun!";
-    InitWindow(WindowState.windowWidth, WindowState.windowHeight, title);
+    InitWindow(Window.windowWidth, Window.windowHeight, title);
     SetWindowMinSize(400, 400);
 
     SetTargetFPS(60);
     Metrics.minFps = INT_MAX;
 
-    InitializeCoreState();
+    InitializeCore();
     Debug("Done initializing..");
 }
 
@@ -784,7 +784,7 @@ void CleanUp()
     Debug("Max FPS: %d", Metrics.maxFps);
     Debug("Avg FPS: %lf", Metrics.avgFps);
     CloseWindow();
-    FreeCoreState();
+    FreeCore();
     Debug("Done cleaning up..");
     fclose(DebugFile);
 }
@@ -793,20 +793,20 @@ void Update()
 {
     SetScreenSize(GetScreenWidth(), GetScreenHeight());
 
-    ViewState.hasFocusedPoint = TryGetFocusedPoint(&ViewState.focusedPoint);
+    View.hasFocusedPoint = TryGetFocusedPoint(&View.focusedPoint);
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && ViewState.hasFocusedPoint) {
-        HandleDrawingInProgress(ViewState.focusedPoint);
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && View.hasFocusedPoint) {
+        HandleAction(View.focusedPoint);
     }
     // if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {}
     if (IsKeyPressed(KEY_S)) {
         Debug("Go to segment drawing!");
-        ViewState.inProgress.type = DRAWING_SEGMENT;
-        ViewState.inProgress.segment.hasFirst = false;
+        View.action.type = ACTION_DRAW_SEGMENT;
+        View.action.segment.hasFirst = false;
     } else if (IsKeyPressed(KEY_C)) {
         Debug("Go to circle drawing!");
-        ViewState.inProgress.type = DRAWING_CIRCLE;
-        ViewState.inProgress.circle.hasCenter = false;
+        View.action.type = ACTION_DRAW_CIRCLE;
+        View.action.circle.hasCenter = false;
     }
 }
 
@@ -815,8 +815,8 @@ void Draw()
     BeginDrawing();
     ClearBackground(RAYWHITE);
     RenderCartesianPlaneAxes();
-    RenderCoreState();
-    RenderDrawingInProgress();
+    RenderCore();
+    RenderAction();
     DrawFPS(5, 5);
     EndDrawing();
 }
