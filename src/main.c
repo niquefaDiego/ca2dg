@@ -439,13 +439,13 @@ struct
     Action action;
 } View = {0};
 
-inline double ViewRectHeight() {
+inline double ViewHeight() {
     const Rect canvas = Window.canvasRect;
     return View.viewWidth / RectWidth(canvas) * RectHeight(canvas);
 }
 
 inline Point ViewTo() {
-    return Add(View.viewFr, (Point){View.viewWidth, ViewRectHeight()});
+    return Add(View.viewFr, (Point){View.viewWidth, ViewHeight()});
 }
 
 struct
@@ -631,7 +631,7 @@ void RenderCartesianPlaneAxes()
         spacing = FindAxisTickSpacing(View.viewWidth);
     }
     if (isYAxisVisible) {
-        float spacingY = FindAxisTickSpacing(ViewRectHeight());
+        float spacingY = FindAxisTickSpacing(ViewHeight());
         if (spacing < spacingY) spacing = spacingY;
     }
 
@@ -789,6 +789,46 @@ void CleanUp()
     fclose(DebugFile);
 }
 
+void HandleViewMovementInputs()
+{
+    Point viewDisplacement = {0};
+    if (IsKeyDown(KEY_W)) viewDisplacement.y += 1.0;
+    if (IsKeyDown(KEY_S)) viewDisplacement.y -= 1.0;
+    if (IsKeyDown(KEY_A)) viewDisplacement.x -= 1.0;
+    if (IsKeyDown(KEY_D)) viewDisplacement.x += 1.0;
+
+    const int MIN_VIEW_X = -1000, MAX_VIEW_X = 1000;
+    const int MIN_VIEW_Y = -1000, MAX_VIEW_Y = 1000;
+
+    // Translate view
+    if (!SamePoint(viewDisplacement, (Point){.x=0, .y=0})) {
+        const double secsToMove1Width = 2.0;
+        double speed = View.viewWidth * (GetFrameTime()/secsToMove1Width);
+        viewDisplacement = Scale(viewDisplacement, speed);
+        View.viewFr = Add(View.viewFr, viewDisplacement);
+        if (View.viewFr.x + View.viewWidth > MAX_VIEW_X)
+            View.viewFr.x = MAX_VIEW_X - View.viewWidth;
+        if (View.viewFr.y + ViewHeight() > MAX_VIEW_Y)
+            View.viewFr.y = MAX_VIEW_Y - ViewHeight();
+        if (View.viewFr.x < MIN_VIEW_X) View.viewFr.x = MIN_VIEW_X;
+        if (View.viewFr.y < MIN_VIEW_Y) View.viewFr.y = MIN_VIEW_Y;
+    }
+
+    // Zoom view
+    const double zoomPerTick = 0.1;
+    if (fabsf(GetMouseWheelMove()) > EPSILON) {
+        View.viewWidth *= (1 - GetMouseWheelMove() * zoomPerTick);
+        if (View.viewFr.x + View.viewWidth > MAX_VIEW_X)
+            View.viewWidth = MAX_VIEW_X - View.viewFr.x;
+        if (View.viewFr.y + ViewHeight() > MAX_VIEW_Y) {
+            double viewH = MAX_VIEW_Y - View.viewFr.y;
+            const Rect canvas = Window.canvasRect;
+            View.viewWidth = viewH / RectHeight(canvas) * RectWidth(canvas);
+        }
+    }
+}
+
+
 void Update()
 {
     SetScreenSize(GetScreenWidth(), GetScreenHeight());
@@ -798,8 +838,9 @@ void Update()
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && View.hasFocusedPoint) {
         HandleAction(View.focusedPoint);
     }
-    // if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {}
-    if (IsKeyPressed(KEY_S)) {
+
+    if (IsKeyPressed(KEY_Q)) {
+        assert(IsKeyPressed(KEY_Q));
         Debug("Go to segment drawing!");
         View.action.type = ACTION_DRAW_SEGMENT;
         View.action.segment.hasFirst = false;
@@ -808,6 +849,8 @@ void Update()
         View.action.type = ACTION_DRAW_CIRCLE;
         View.action.circle.hasCenter = false;
     }
+
+    HandleViewMovementInputs();
 }
 
 void Draw()
