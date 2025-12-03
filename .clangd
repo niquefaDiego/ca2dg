@@ -1,0 +1,7 @@
+CompileFlags:
+  Add:
+    - -IC:\raylib\raylib\src
+    - -std=c23
+    - -Wall
+    - -Wextra
+    - -Wpedantic

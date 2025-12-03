@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -575,7 +576,7 @@ bool TryGetFocusedPoint(Point* outPoint)
     d = hypotf(dx, dy);
     closestDistance = d;
     closestPoint = latticePoint;
-    
+
     // check all points in core state
     size_t nPoints = ListSize(Core.points);
     for (size_t i = 0; i < nPoints; i++) {
@@ -758,8 +759,15 @@ void RenderCore()
 
 void Initialize()
 {
-    DebugFile = fopen("Debug.log", "w");
+#define LOG_FILE "Debug.log"
+    errno_t err = fopen_s(&DebugFile, LOG_FILE, "w");
     Debug("Initializing..");
+
+    if (err || DebugFile == NULL) {
+        perror("Failed to open " LOG_FILE " file for writing");
+        DebugFile = NULL;
+    }
+#undef LOG_FILE
 
     View.viewFr = (Point){-10.0, -10.0};
     View.viewWidth = 30;
