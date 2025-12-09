@@ -1,10 +1,11 @@
-#include <stdio.h>
-#include <limits.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <math.h>
-#include <stdlib.h>
 #include <assert.h>
+#include <limits.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "raylib.h"
 #include "raymath.h"
 
@@ -427,6 +428,86 @@ typedef union {
     DrawCircleAction circle;
 } Action;
 
+
+// ----- Toasts -----
+
+#define TOAST_FONT_SIZE 24
+
+typedef struct {
+    // null-terminated string with the message to display
+    char* message;
+    float seconds_left;
+} Toast;
+
+struct ToastListNode_s;
+typedef struct ToastListNode_s {
+    Toast* toast;
+    struct ToastListNode_s *next;
+} ToastListNode;
+
+typedef struct {
+    ToastListNode* first;
+    ToastListNode* last;
+} Toasts;
+
+void ToastLinkNodeFree(ToastListNode* node) {
+    free(node->toast->message);
+    free(node->toast);
+    free(node);
+}
+
+// Onwership of message is transferred
+Toast* ToastNew(char* message) {
+    Toast* toast = malloc(sizeof(Toast));
+    toast->message = message;
+    toast->seconds_left = 0.8;
+    return toast;
+}
+
+Toast* ToastsPeek(Toasts* toasts) {
+    if (!toasts->first) return NULL;
+    return toasts->first->toast;
+}
+
+void ToastsPush(Toasts* toasts, Toast* newToast) {
+    Debug("Pushing toast '%s'\n", newToast->message);
+    ToastListNode* node = malloc(sizeof(ToastListNode));
+    node->toast = newToast;
+    node->next = NULL;
+    if (!toasts->first) {
+        assert(!toasts->last);
+        toasts->first = toasts->last = node;
+    } else {
+        toasts->last->next = node;
+        toasts->last = node;
+    }
+}
+
+void ToastsPop(Toasts* toasts) {
+    assert(toasts->first);
+    Debug("Popping toast '%s'", toasts->first->toast->message);
+    ToastListNode *second = toasts->first->next;
+    ToastLinkNodeFree(toasts->first);
+    if (second) { toasts->first = second; }
+    else { toasts->first = toasts->last = NULL; }
+}
+
+void ToastsRender(Toasts* toasts) {
+    Toast* toast = ToastsPeek(toasts);
+    if (toast == NULL) return;
+    float y = Window.canvasRect.to.y - TOAST_FONT_SIZE * 1.5;
+    float x = (Window.canvasRect.to.x + Window.canvasRect.fr.x) / 2.0;
+    int textWidth = MeasureText(toast->message, TOAST_FONT_SIZE);
+    x -= textWidth / 2.0;
+    DrawText(toast->message, x, y, TOAST_FONT_SIZE, DARKGRAY);
+    toast->seconds_left -= GetFrameTime();
+    if (toast->seconds_left <= 0) {
+        ToastsPop(toasts);
+    }
+}
+
+// ----- End toasts -----
+
 struct
 {
     // Rectangle of the cartesian plane being rendered
@@ -438,6 +519,7 @@ struct
     Point focusedPoint;
     // Action in progress
     Action action;
+    Toasts toasts;
 } View = {0};
 
 inline double ViewHeight() {
@@ -718,6 +800,7 @@ void RenderDrawCircleAction() {
     }
 }
 
+
 void RenderAction()
 {
     switch (View.action.type) {
@@ -837,7 +920,7 @@ void HandleViewMovementInputs()
 }
 
 
-void Update()
+void HandleInputs()
 {
     SetScreenSize(GetScreenWidth(), GetScreenHeight());
 
@@ -849,11 +932,20 @@ void Update()
 
     if (IsKeyPressed(KEY_Q)) {
         assert(IsKeyPressed(KEY_Q));
-        Debug("Go to segment drawing!");
+        size_t toast_message_size = 32;
+        char* toast_message = malloc(toast_message_size);
+        strcpy_s(toast_message, toast_message_size, "Drawing segment...");
+        Toast* toast = ToastNew(toast_message);
+        ToastsPush(&View.toasts, toast);
         View.action.type = ACTION_DRAW_SEGMENT;
         View.action.segment.hasFirst = false;
     } else if (IsKeyPressed(KEY_C)) {
         Debug("Go to circle drawing!");
+        size_t toast_message_size = 32;
+        char* toast_message = malloc(toast_message_size);
+        strcpy_s(toast_message, toast_message_size, "Drawing circle...");
+        Toast* toast = ToastNew(toast_message);
+        ToastsPush(&View.toasts, toast);
         View.action.type = ACTION_DRAW_CIRCLE;
         View.action.circle.hasCenter = false;
     }
@@ -869,6 +961,7 @@ void Draw()
     RenderCore();
     RenderAction();
     DrawFPS(5, 5);
+    ToastsRender(&View.toasts);
     EndDrawing();
 }
 
@@ -889,7 +982,7 @@ int main(void)
 
     while (!WindowShouldClose()) {
         Draw();
-        Update();
+        HandleInputs();
         GatherMetrics();
     }
 
